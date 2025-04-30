@@ -1,0 +1,160 @@
+/* Modern CSS Reset 2025 */
+
+/* Box sizing for all elements */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* Root defaults */
+:root {
+    font-size: 16px;
+    scroll-behavior: smooth;
+}
+
+/* Body defaults */
+body {
+    min-height: 100vh;
+    line-height: 1.5;
+    text-rendering: optimizeSpeed;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+    background: #1a1a1a;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.container {
+    width: 100%;
+    max-width: 1200px;
+    padding: 2rem;
+    margin: 0 auto;
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 2rem;
+    font-weight: 300;
+    letter-spacing: 0.05em;
+    color: #4CAF50;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6, p {
+    overflow-wrap: break-word;
+}
+
+/* Media */
+img, picture, video, canvas, svg {
+    display: block;
+    max-width: 100%;
+}
+
+/* Forms */
+input, button, textarea, select {
+    font: inherit;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    margin: 0 10px;
+    cursor: pointer;
+    background: #4CAF50;
+    border: none;
+    color: white;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+}
+
+button:hover:not(:disabled) {
+    background: #fff;
+    color: #000;
+}
+
+button:disabled {
+    background: #666;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* Remove list styles */
+ul, ol {
+    list-style: none;
+}
+
+/* Links */
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+.controls {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    margin: 20px 0;
+}
+
+.visualization {
+    width: 100%;
+    height: 60vh;
+    min-height: 400px;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 20px auto;
+    width: 600px;
+    height: 600px;
+}
+
+#visualizer {
+    width: 100%;
+    height: 100%;
+    background: #222;
+}
+
+.currentPositions {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #333;
+    border-radius: 4px;
+}
+
+.currentPositions h2 {
+    margin-top: 0;
+    color: #4CAF50;
+}
+
+#positionsList {
+    list-style: none;
+    padding: 0;
+}
+
+#positionsList li {
+    margin: 10px 0;
+    font-family: monospace;
+}
+
+/* Remove animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
