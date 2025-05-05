@@ -62,7 +62,8 @@ input, button, textarea, select {
     font: inherit;
 }
 
-button {
+button, .button[role="button"] {
+    display: inline-block;
     padding: 10px 20px;
     font-size: 16px;
     margin: 0 10px;
@@ -74,12 +75,12 @@ button {
     transition: all 0.3s ease;
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled), .button[role="button"]:hover:not(.disabled) {
     background: #fff;
     color: #000;
 }
 
-button:disabled {
+button:disabled, .button[role="button"].disabled {
     background: #666;
     cursor: not-allowed;
     opacity: 0.5;
@@ -99,10 +100,43 @@ a {
 .controls {
     display: flex;
     justify-content: center;
+    align-items: center;
     gap: 1rem;
-    margin-bottom: 2rem;
-    text-align: center;
     margin: 20px 0;
+    flex-wrap: wrap;
+}
+
+#fileInput {
+    background: #333;
+    padding: 10px;
+    border-radius: 4px;
+    color: white;
+    max-width: 300px;
+}
+
+#fileInput::file-selector-button {
+    background: #4CAF50;
+    color: white;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+#fileInput::file-selector-button:hover {
+    background: #45a049;
+}
+
+.file-upload input {
+    clip: rect(0,0,0,0);
+    clip-path: inset(50%);
+    height: 1px;
+    width: 1px;
+    margin: -1px;
+    overflow: clip;
+    white-space: pre;
+    position: absolute;
 }
 
 .visualization {
@@ -116,6 +150,12 @@ a {
     margin: 20px auto;
     width: 600px;
     height: 600px;
+}
+
+.visualization canvas {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
 }
 
 #visualizer {

@@ -10,22 +10,12 @@
     <div class="container">
         <h1>Nature Denatured and Found Again</h1>
         <div class="controls">
-            <button id="startButton">Start Experience</button>
+            <input type="file" id="fileInput" multiple accept="audio/*" />
+            <button id="startButton" disabled>Start Experience</button>
             <button id="stopButton" disabled>Stop</button>
         </div>
         <div class="visualization">
             <canvas id="visualizer"></canvas>
-        </div>
-        <div class="currentPositions">
-            <h2>Current Positions</h2>
-            <ul id="positionsList">
-                <li>Listener: <span></span></li>
-                <li>Disc 1: <span></span></li>
-                <li>Disc 2: <span></span></li>
-                <li>Disc 3: <span></span></li>
-                <li>Disc 4: <span></span></li>
-                <li>Disc 5: <span></span></li>
-            </ul>
         </div>
     </div>
     <script src="app.js"></script>

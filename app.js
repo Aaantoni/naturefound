@@ -73,47 +73,67 @@ class Listener {
     }
 }
 
-class AudioSource {
-    constructor(context, position, trackPath) {
+class AudioManager {
+    constructor(context, discs) {
         this.context = context;
-        this.position = position;
-        this.trackPath = trackPath;
-        this.source = null;
-        this.panner = null;
-        this.audioElement = null;
+        this.discs = discs;
+        this.currentTrack = 0;
+        this.setupPanners();
+        this.currentSources = this.setupSources();
+        this.nextSources = [];
+        this.setup();
     }
-
-    async setup() {
-        // Create audio element
-        this.audioElement = new Audio(this.trackPath);
-        this.audioElement.loop = true;
-        
-        // Create media element source
-        this.source = this.context.createMediaElementSource(this.audioElement);
-
-        this.panner = new PannerNode(this.context, {
-            positionX: this.position.x,
-            positionY: 0,
-            positionZ: this.position.z,
-            refDistance: 1,
-            maxDistance: 15,
-            rolloffFactor: 1,
-            distanceModel: 'inverse',
-            panningModel: 'HRTF'
+    setupPanners() {
+        this.discs.forEach(disc => {
+            disc.panner = new PannerNode(this.context, {
+                positionX: disc.point.x,
+                positionY: 0,
+                positionZ: disc.point.z,
+                refDistance: 1,
+                maxDistance: 15,
+                rolloffFactor: 1,
+                distanceModel: 'inverse',
+                panningModel: 'HRTF'
+            });
         });
-
-        this.source.connect(this.panner).connect(this.context.destination);
     }
-
-    start() {
-        this.audioElement?.play().catch(console.error);
+    setupSources(track = this.currentTrack) {
+        return this.discs.map(disc => {
+            const audioFile = new Audio(disc.tracks[track].file);
+            return this.context.createMediaElementSource(audioFile);
+        });
     }
-
-    stop() {
-        if (this.audioElement) {
-            this.audioElement.pause();
-            this.audioElement.currentTime = 0;
-        }
+    setup(sources = this.currentSources) {
+        this.discs.forEach((disc, index) => {
+            // If there is already a source connected to the panner, disconnect it
+            if (disc.panner.numberOfInputs > 0) {
+                disc.panner.disconnect();
+            }
+            sources[index].connect(disc.panner).connect(this.context.destination);
+        });
+    }
+    play() {
+        this.currentSources.forEach(source => {
+            source.mediaElement.play().catch(console.error);
+        });
+        // Every track is exactly the same length, so we can use the first one to determine when to switch tracks
+        this.currentSources[0].mediaElement.addEventListener('timeupdate', () => {
+            if (this.currentSources[0].mediaElement.currentTime >= this.currentSources[0].mediaElement.duration - 12) {
+                this.nextSources = this.setupSources((this.currentTrack + 1) % 4);
+            }
+        });
+        this.currentSources[0].mediaElement.addEventListener('ended', () => {
+            this.setup(this.nextSources);
+            this.currentSources = this.nextSources;
+            this.currentTrack = (this.currentTrack + 1) % 4;
+            this.nextSources = [];
+            this.play();
+        });
+    }
+    pause() {
+        this.currentSources.forEach(source => {
+            source.mediaElement.pause();
+        });
     }
 }
 
@@ -129,35 +149,39 @@ class Visualizer {
         this.canvas.height = this.canvas.offsetHeight;
     }
 
-    draw(pentagonPoints, listener) {
+    draw(discs, listener) {
         this.resize();
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
 
         // Draw pentagon
         this.ctx.beginPath();
-        this.ctx.moveTo(pentagonPoints[0].x * this.scale, pentagonPoints[0].z * this.scale);
-        for (let i = 1; i < pentagonPoints.length; i++) {
-            this.ctx.lineTo(pentagonPoints[i].x * this.scale, pentagonPoints[i].z * this.scale);
+        this.ctx.moveTo(discs[0].point.x * this.scale, discs[0].point.z * this.scale);
+        for (let i = 1; i < discs.length; i++) {
+            this.ctx.lineTo(discs[i].point.x * this.scale, discs[i].point.z * this.scale);
         }
         this.ctx.closePath();
         this.ctx.strokeStyle = '#666';
         this.ctx.stroke();
 
         // Draw sound sources
-        pentagonPoints.forEach(point => {
+        discs.forEach(disc => {
             this.ctx.fillStyle = '#f00';
             this.ctx.beginPath();
-            this.ctx.arc(point.x * this.scale, point.z * this.scale, 5, 0, Math.PI * 2);
+            this.ctx.arc(disc.point.x * this.scale, disc.point.z * this.scale, 5, 0, Math.PI * 2);
             this.ctx.fill();
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = '12px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 20);
         });
 
         // Draw listener
         this.ctx.fillStyle = '#00f';
         this.ctx.beginPath();
         this.ctx.arc(
-            listener.position.x * this.scale, 
-            listener.position.z * this.scale, 
+            listener.position.x * this.scale,
+            listener.position.z * this.scale,
             8, 0, Math.PI * 2
         );
         this.ctx.fill();
@@ -177,60 +201,118 @@ class Visualizer {
     }
 }
 
-class SpatialAudioExperience {
+class NatureDenaturedAndFoundAgain {
     constructor() {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        this.tracks = [
-            'Disc 1 - Fissures In Green.mp3',
-            'Disc 2 - Pathsplitter - Yellow-Red.mp3',
-            'Disc 3 - Landscape In Black And Grey.mp3',
-            'Disc 4 - White Light Under The Door.mp3',
-            'Disc 5 - Hellgrun - Small New World.mp3'
+
+        this.discs = [
+            {
+                "discName": "Fissures in Green (2011)",
+                "tracks": [
+                    { "trackTitle": "Rain at the Station", file: null },
+                    { "trackTitle": "Still Life with Cicadas, Waterfall and Radu", file: null },
+                    { "trackTitle": "Silent Prayer", file: null },
+                    { "trackTitle": "Langhalsen", file: null },
+                ],
+                "point": null,
+                "panner": null,
+            },
+            {
+                "discName": "Pathsplitter (Yellow-Red) (2012)",
+                "tracks": [
+                    { "trackTitle": "Canon a2", file: null },
+                    { "trackTitle": "Canon a3", file: null },
+                    { "trackTitle": "Canon a4", file: null },
+                    { "trackTitle": "Canon a5", file: null },
+                ],
+                "point": null,
+                "panner": null,
+            },
+            {
+                "discName": "Landscape in Black and Grey (2013)",
+                "tracks": [
+                    { "trackTitle": "The Chords of the Grosse Mühl", file: null },
+                    { "trackTitle": "Six-Part Panorama", file: null },
+                    { "trackTitle": "Building a World", file: null },
+                    { "trackTitle": "The Disappearance of a World", file: null },
+                ],
+                "point": null,
+                "panner": null,
+            },
+            {
+                "discName": "White Light Under the Door (2014)",
+                "tracks": [
+                    { "trackTitle": "Electricity", file: null },
+                    { "trackTitle": "Heat", file: null },
+                    { "trackTitle": "Light", file: null },
+                    { "trackTitle": "Gas", file: null },
+                ],
+                "point": null,
+                "panner": null,
+            },
+            {
+                "discName": "Hellgrün (Small New World) (2015)",
+                "tracks": [
+                    { "trackTitle": "Malachite", file: null },
+                    { "trackTitle": "Bird Warnings", file: null },
+                    { "trackTitle": "The River is a Green-Brown God", file: null },
+                    { "trackTitle": "Emerald Twilight", file: null },
+                ],
+                "point": null,
+                "panner": null,
+            }
         ];
-        
+
         this.radius = 5;
         this.boundaryRadius = this.radius * 0.6667;
-        this.pentagonPoints = this.calculatePentagonPoints();
-        
+        this.calculatePentagonPoints();
+
+        this.audioManager = null;
         this.listener = new Listener();
-        this.audioSources = this.createAudioSources();
         this.visualizer = new Visualizer('visualizer');
-        
+
         this.animationFrameId = null;
         this.isPlaying = false;
 
         this.setupEventListeners();
+
+        this.visualizer.draw(this.discs, this.listener);
     }
 
     calculatePentagonPoints() {
-        const points = [];
         for (let i = 0; i < 5; i++) {
-            const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
-            points.push(new Vector2D(
+            const angle = ((i * 2 * Math.PI) / 5 - Math.PI / 4) * 2;
+            this.discs[i].point = new Vector2D(
                 this.radius * Math.cos(angle),
                 this.radius * Math.sin(angle)
-            ));
+            );
         }
-        return points;
     }
 
-    createAudioSources() {
-        return this.tracks.map((track, i) => 
-            new AudioSource(this.audioContext, this.pentagonPoints[i], track)
-        );
+    createAudioSources(files) {
+        for (let file of files) {
+            const match = /^([1-5])\.0?([1-4])/.exec(file.name);
+            if (match) {
+                const discIndex = +(parseInt(match[1]) - 1);
+                const trackIndex = +(parseInt(match[2]) - 1);
+                this.discs[discIndex].tracks[trackIndex].file = URL.createObjectURL(file);
+            }
+        }
+        return this.discs;
     }
 
     setupEventListeners() {
+        const fileInput = document.getElementById('fileInput');
+        fileInput.addEventListener('change', () => {
+            this.discs = this.createAudioSources(fileInput.files);
+            this.audioManager = new AudioManager(this.audioContext, this.discs);
+            document.getElementById('startButton').disabled = false;
+        });
         document.getElementById('startButton').addEventListener('click', () => this.start());
         document.getElementById('stopButton').addEventListener('click', () => this.stop());
-        window.addEventListener('load', () => this.visualizer.resize());
-    }
-
-    updatePositionsDisplay() {
-        const positions = document.querySelectorAll('#positionsList span');
-        positions[0].textContent = `(${this.listener.position.x.toFixed(2)}, ${this.listener.position.z.toFixed(2)})`;
-        this.pentagonPoints.forEach((point, i) => {
-            positions[i + 1].textContent = `(${point.x.toFixed(2)}, ${point.z.toFixed(2)})`;
+        window.addEventListener('load', () => {
+            this.visualizer.resize();
+            this.visualizer.draw(this.discs, this.listener);
         });
     }
 
@@ -255,8 +337,7 @@ class SpatialAudioExperience {
     update() {
         this.listener.update(this.boundaryRadius);
         this.updateAudioListener();
-        this.updatePositionsDisplay();
-        this.visualizer.draw(this.pentagonPoints, this.listener);
+        this.visualizer.draw(this.discs, this.listener);
 
         if (this.isPlaying) {
             this.animationFrameId = requestAnimationFrame(() => this.update());
@@ -269,11 +350,7 @@ class SpatialAudioExperience {
         }
 
         if (!this.isPlaying) {
-            // Since we're using HTML Audio elements, we can set up all sources at construction
-            if (!this.audioSources[0].source) {
-                await Promise.all(this.audioSources.map(source => source.setup()));
-            }
-            this.audioSources.forEach(source => source.start());
+            this.audioManager.play();
             this.isPlaying = true;
             this.update();
             document.getElementById('startButton').disabled = true;
@@ -283,7 +360,7 @@ class SpatialAudioExperience {
 
     stop() {
         if (this.isPlaying) {
-            this.audioSources.forEach(source => source.stop());
+            this.audioManager.stop();
             this.isPlaying = false;
             cancelAnimationFrame(this.animationFrameId);
             document.getElementById('startButton').disabled = false;
@@ -293,4 +370,4 @@ class SpatialAudioExperience {
 }
 
 // Initialize the experience
-const experience = new SpatialAudioExperience();
+const app = new NatureDenaturedAndFoundAgain();
