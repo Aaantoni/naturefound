@@ -19,19 +19,6 @@ class Vector2D {
     length() {
         return Math.sqrt(this.x * this.x + this.z * this.z);
     }
-
-    normalize() {
-        const len = this.length();
-        if (len > 0) {
-            this.x /= len;
-            this.z /= len;
-        }
-        return this;
-    }
-
-    clone() {
-        return new Vector2D(this.x, this.z);
-    }
 }
 
 class Visualizer {
@@ -106,34 +93,59 @@ class Listener {
         this.rotationVelocity = 0;
     }
 
-    update(bounds, hardBounds) {
+    update(bounds, hardBounds, keys) {
+        const distanceFromCenter = this.position.length();
+        const angle = Math.atan2(this.position.z, this.position.x);
         // Update velocities with random accelerations
-        this.velocity.add(new Vector2D(
-            (Math.random() - 0.5) * 0.005,
-            (Math.random() - 0.5) * 0.005
-        ));
-        this.rotationVelocity += (Math.random() - 0.5) * 0.005;
+        if (!(keys["ArrowUp"] || keys["w"] || keys["ArrowDown"] || keys["s"] ||
+            keys["ArrowRight"] || keys["a"] || keys["ArrowLeft"] || keys["d"])) {
+            this.velocity.add(new Vector2D(
+                (Math.random() - 0.5) * 0.005,
+                (Math.random() - 0.5) * 0.005
+            ));
+            this.rotationVelocity += (Math.random() - 0.5) * 0.005;
+            
+            if (distanceFromCenter > bounds) {
+                this.position.add(this.getCenterVector().scale(-0.01));
+            }
 
-        // Apply damping
-        this.velocity.scale(0.97);
-        this.rotationVelocity *= 0.97;
+            // Apply damping
+            this.velocity.scale(0.97);
+            this.rotationVelocity *= 0.97;
 
-        // Update position and rotation
-        this.position.add(this.velocity);
-        this.rotation += this.rotationVelocity;
+            // Update position and rotation
+            this.position.add(this.velocity);
+            this.rotation += this.rotationVelocity;
+        } else {
+            // Update velocities based on key presses
+            if (keys["ArrowUp"] || keys["w"]) {
+                this.position.add(this.getForwardVector().scale(0.01));
+            }
+            if (keys["ArrowDown"] || keys["s"]) {
+                this.position.add(this.getForwardVector().scale(-0.01));
+            }
+            if (keys["ArrowLeft"] || keys["a"]) {
+                this.rotation += 0.01;
+            }
+            if (keys["ArrowRight"] || keys["d"]) {
+                this.rotation -= 0.01;
+            }
+        }
 
         // Keep within bounds
-        const distanceFromCenter = this.position.length();
         if (distanceFromCenter > hardBounds) {
-            const angle = Math.atan2(this.position.z, this.position.x);
-            this.position.x = bounds * Math.cos(angle);
-            this.position.z = bounds * Math.sin(angle);
+            this.position = this.getCenterVector().scale(hardBounds);
             this.velocity.scale(-0.5);
         }
     }
 
     getForwardVector() {
         return new Vector2D(Math.sin(this.rotation), Math.cos(this.rotation));
+    }
+
+    getCenterVector() {
+        const angle = Math.atan2(this.position.z, this.position.x);
+        return new Vector2D(Math.cos(angle), Math.sin(angle));
     }
 }
 
@@ -149,10 +161,12 @@ class AudioManager {
         this.nextSources = [];
         this.ready = this.init();
     }
+
     async init() {
         this.currentSources = await this.setupSources();
         this.setup();
     }
+
     setupPanners() {
         this.discs.forEach(disc => {
             disc.panner = new PannerNode(this.context, {
@@ -160,13 +174,14 @@ class AudioManager {
                 positionY: 0,
                 positionZ: disc.point.z,
                 refDistance: 1,
-                maxDistance: 15,
+                maxDistance: 10,
                 rolloffFactor: 1,
                 distanceModel: 'inverse',
                 panningModel: 'HRTF'
             });
         });
     }
+
     async setupSources(track = this.currentTrack) {
         const sources = await Promise.all(this.discs.map(async disc => {
             const blobUrl = URL.createObjectURL(disc.tracks[track].file);
@@ -183,6 +198,7 @@ class AudioManager {
         }));
         return sources;
     }
+
     setup(sources = this.currentSources) {
         this.discs.forEach((disc, index) => {
             // If there is already a source connected to the panner, disconnect it
@@ -192,9 +208,11 @@ class AudioManager {
             sources[index].connect(disc.panner).connect(this.context.destination);
         });
     }
+
     async prepareNextSources(track = (this.currentTrack + 1) % 4) {
         this.nextSources = await this.setupSources(track);
     }
+
     async playNextSources(sources = this.nextSources, ended = false) {
         this.setup(sources);
         this.cleanupAudio(ended);
@@ -203,6 +221,7 @@ class AudioManager {
         this.nextSources = [];
         await this.play();
     }
+
     async play() {
         await Promise.all(this.currentSources.map(source => {
             return source.mediaElement.play().catch(console.error);
@@ -219,15 +238,18 @@ class AudioManager {
         this.currentSources[0].mediaElement.addEventListener('timeupdate', this.timeUpdateListener);
         this.currentSources[0].mediaElement.addEventListener('ended', this.endedListener);
     }
+
     async pause() {
         await Promise.all(this.currentSources.map(source => {
             return source.mediaElement.pause();
         }));
     }
+
     async next() {
         await this.prepareNextSources();
         await this.playNextSources();
     }
+
     cleanupAudio(ended = false, all = false) {
         this.currentSources.forEach(source => {
             if (!ended) {
@@ -250,11 +272,13 @@ class AudioManager {
             });
         }
     }
+
     cleanupPanners() {
         this.discs.forEach(disc => {
             disc.panner.disconnect();
         });
     }
+
     destroy() {
         this.cleanupAudio(false, true);
         this.cleanupPanners();
@@ -324,7 +348,7 @@ class NatureDenaturedAndFoundAgain {
         ];
 
         this.radius = 5;
-        this.boundaryRadius = this.radius * 0.6667;
+        this.boundaryRadius = this.radius * 0.4;
         this.hardBoundaryRadius = this.radius * 1.3333;
         this.calculatePentagonPoints();
 
@@ -334,6 +358,9 @@ class NatureDenaturedAndFoundAgain {
 
         this.animationFrameId = null;
         this.isPlaying = false;
+
+        this.keys = [];
+        this.setupKeys();
 
         this.setupEventListeners();
 
@@ -385,6 +412,15 @@ class NatureDenaturedAndFoundAgain {
         });
     }
 
+    setupKeys() {
+        window.addEventListener('keydown', (event) => {
+            this.keys[event.key] = true;
+        });
+        window.addEventListener('keyup', (event) => {
+            this.keys[event.key] = false;
+        });
+    }
+
     updateAudioListener() {
         const audioListener = this.audioContext.listener;
         const currentTime = this.audioContext.currentTime;
@@ -404,7 +440,7 @@ class NatureDenaturedAndFoundAgain {
     }
 
     update() {
-        this.appListener.update(this.boundaryRadius, this.hardBoundaryRadius);
+        this.appListener.update(this.boundaryRadius, this.hardBoundaryRadius, this.keys);
         this.updateAudioListener();
         this.visualizer.draw(this.discs, this.appListener);
 
