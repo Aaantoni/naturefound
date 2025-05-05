@@ -34,109 +34,6 @@ class Vector2D {
     }
 }
 
-class Listener {
-    constructor() {
-        this.position = new Vector2D();
-        this.velocity = new Vector2D();
-        this.rotation = 0;
-        this.rotationVelocity = 0;
-    }
-
-    update(bounds) {
-        // Update velocities with random accelerations
-        this.velocity.add(new Vector2D(
-            (Math.random() - 0.5) * 0.005,
-            (Math.random() - 0.5) * 0.005
-        ));
-        this.rotationVelocity += (Math.random() - 0.5) * 0.005;
-
-        // Apply damping
-        this.velocity.scale(0.97);
-        this.rotationVelocity *= 0.97;
-
-        // Update position and rotation
-        this.position.add(this.velocity);
-        this.rotation += this.rotationVelocity;
-
-        // Keep within bounds
-        const distanceFromCenter = this.position.length();
-        if (distanceFromCenter > bounds) {
-            const angle = Math.atan2(this.position.z, this.position.x);
-            this.position.x = bounds * Math.cos(angle);
-            this.position.z = bounds * Math.sin(angle);
-            this.velocity.scale(-0.5);
-        }
-    }
-
-    getForwardVector() {
-        return new Vector2D(Math.sin(this.rotation), Math.cos(this.rotation));
-    }
-}
-
-class AudioManager {
-    constructor(context, discs) {
-        this.context = context;
-        this.discs = discs;
-        this.currentTrack = 0;
-        this.setupPanners();
-        this.currentSources = this.setupSources();
-        this.nextSources = [];
-        this.setup();
-    }
-    setupPanners() {
-        this.discs.forEach(disc => {
-            disc.panner = new PannerNode(this.context, {
-                positionX: disc.point.x,
-                positionY: 0,
-                positionZ: disc.point.z,
-                refDistance: 1,
-                maxDistance: 15,
-                rolloffFactor: 1,
-                distanceModel: 'inverse',
-                panningModel: 'HRTF'
-            });
-        });
-    }
-    setupSources(track = this.currentTrack) {
-        return this.discs.map(disc => {
-            const audioFile = new Audio(disc.tracks[track].file);
-            return this.context.createMediaElementSource(audioFile);
-        });
-    }
-    setup(sources = this.currentSources) {
-        this.discs.forEach((disc, index) => {
-            // If there is already a source connected to the panner, disconnect it
-            if (disc.panner.numberOfInputs > 0) {
-                disc.panner.disconnect();
-            }
-            sources[index].connect(disc.panner).connect(this.context.destination);
-        });
-    }
-    async play() {
-        await Promise.all(this.currentSources.map(source => {
-            return source.mediaElement.play().catch(console.error);
-        }));
-        // Every track is exactly the same length, so we can use the first one to determine when to switch tracks
-        this.currentSources[0].mediaElement.addEventListener('timeupdate', () => {
-            if (this.currentSources[0].mediaElement.currentTime >= this.currentSources[0].mediaElement.duration - 12) {
-                this.nextSources = this.setupSources((this.currentTrack + 1) % 4);
-            }
-        });
-        this.currentSources[0].mediaElement.addEventListener('ended', async () => {
-            this.setup(this.nextSources);
-            this.currentSources = this.nextSources;
-            this.currentTrack = (this.currentTrack + 1) % 4;
-            this.nextSources = [];
-            await this.play();
-        });
-    }
-    async pause() {
-        await Promise.all(this.currentSources.map(source => {
-            return source.mediaElement.pause();
-        }));
-    }
-}
-
 class Visualizer {
     constructor(canvasId, scale = 40) {
         this.canvas = document.getElementById(canvasId);
@@ -149,7 +46,7 @@ class Visualizer {
         this.canvas.height = this.canvas.offsetHeight;
     }
 
-    draw(discs, listener) {
+    draw(discs, appListener) {
         this.resize();
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
@@ -180,24 +77,187 @@ class Visualizer {
         this.ctx.fillStyle = '#00f';
         this.ctx.beginPath();
         this.ctx.arc(
-            listener.position.x * this.scale,
-            listener.position.z * this.scale,
+            appListener.position.x * this.scale,
+            appListener.position.z * this.scale,
             8, 0, Math.PI * 2
         );
         this.ctx.fill();
 
         // Draw listener direction
-        const forward = listener.getForwardVector();
+        const forward = appListener.getForwardVector();
         this.ctx.beginPath();
-        this.ctx.moveTo(listener.position.x * this.scale, listener.position.z * this.scale);
+        this.ctx.moveTo(appListener.position.x * this.scale, appListener.position.z * this.scale);
         this.ctx.lineTo(
-            (listener.position.x + forward.x) * this.scale,
-            (listener.position.z + forward.z) * this.scale
+            (appListener.position.x + forward.x) * this.scale,
+            (appListener.position.z + forward.z) * this.scale
         );
         this.ctx.strokeStyle = '#00f';
         this.ctx.stroke();
 
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+}
+
+class Listener {
+    constructor() {
+        this.position = new Vector2D();
+        this.velocity = new Vector2D();
+        this.rotation = 0;
+        this.rotationVelocity = 0;
+    }
+
+    update(bounds, hardBounds) {
+        // Update velocities with random accelerations
+        this.velocity.add(new Vector2D(
+            (Math.random() - 0.5) * 0.005,
+            (Math.random() - 0.5) * 0.005
+        ));
+        this.rotationVelocity += (Math.random() - 0.5) * 0.005;
+
+        // Apply damping
+        this.velocity.scale(0.97);
+        this.rotationVelocity *= 0.97;
+
+        // Update position and rotation
+        this.position.add(this.velocity);
+        this.rotation += this.rotationVelocity;
+
+        // Keep within bounds
+        const distanceFromCenter = this.position.length();
+        if (distanceFromCenter > hardBounds) {
+            const angle = Math.atan2(this.position.z, this.position.x);
+            this.position.x = bounds * Math.cos(angle);
+            this.position.z = bounds * Math.sin(angle);
+            this.velocity.scale(-0.5);
+        }
+    }
+
+    getForwardVector() {
+        return new Vector2D(Math.sin(this.rotation), Math.cos(this.rotation));
+    }
+}
+
+class AudioManager {
+    constructor(context, discs) {
+        this.context = context;
+        this.discs = discs;
+        this.currentTrack = 0;
+        this.timeUpdateListener = null;
+        this.endedListener = null;
+        this.setupPanners();
+        this.currentSources = [];
+        this.nextSources = [];
+        this.ready = this.init();
+    }
+    async init() {
+        this.currentSources = await this.setupSources();
+        this.setup();
+    }
+    setupPanners() {
+        this.discs.forEach(disc => {
+            disc.panner = new PannerNode(this.context, {
+                positionX: disc.point.x,
+                positionY: 0,
+                positionZ: disc.point.z,
+                refDistance: 1,
+                maxDistance: 15,
+                rolloffFactor: 1,
+                distanceModel: 'inverse',
+                panningModel: 'HRTF'
+            });
+        });
+    }
+    async setupSources(track = this.currentTrack) {
+        const sources = await Promise.all(this.discs.map(async disc => {
+            const blobUrl = URL.createObjectURL(disc.tracks[track].file);
+            const audioFile = new Audio(blobUrl);
+            await new Promise((resolve, reject) => {
+                audioFile.addEventListener('canplaythrough', resolve, { once: true });
+                audioFile.addEventListener('error', reject, { once: true });
+                audioFile.crossOrigin = 'anonymous';
+                audioFile.preload = 'auto';
+            });
+            const source = this.context.createMediaElementSource(audioFile);
+            URL.revokeObjectURL(blobUrl);
+            return source;
+        }));
+        return sources;
+    }
+    setup(sources = this.currentSources) {
+        this.discs.forEach((disc, index) => {
+            // If there is already a source connected to the panner, disconnect it
+            if (disc.panner.numberOfInputs > 0) {
+                disc.panner.disconnect();
+            }
+            sources[index].connect(disc.panner).connect(this.context.destination);
+        });
+    }
+    async prepareNextSources(track = (this.currentTrack + 1) % 4) {
+        this.nextSources = await this.setupSources(track);
+    }
+    async playNextSources(sources = this.nextSources, ended = false) {
+        this.setup(sources);
+        this.cleanupAudio(ended);
+        this.currentSources = sources;
+        this.currentTrack = (this.currentTrack + 1) % 4;
+        this.nextSources = [];
+        await this.play();
+    }
+    async play() {
+        await Promise.all(this.currentSources.map(source => {
+            return source.mediaElement.play().catch(console.error);
+        }));
+        this.timeUpdateListener = async () => {
+            // Every track is exactly the same length, so we can use just the first one to determine when to switch tracks
+            if (this.currentSources[0].mediaElement.currentTime >= this.currentSources[0].mediaElement.duration - 12) {
+                await this.prepareNextSources();
+            }
+        };
+        this.endedListener = async () => {
+            await this.playNextSources(this.nextSources, true);
+        };
+        this.currentSources[0].mediaElement.addEventListener('timeupdate', this.timeUpdateListener);
+        this.currentSources[0].mediaElement.addEventListener('ended', this.endedListener);
+    }
+    async pause() {
+        await Promise.all(this.currentSources.map(source => {
+            return source.mediaElement.pause();
+        }));
+    }
+    async next() {
+        await this.prepareNextSources();
+        await this.playNextSources();
+    }
+    cleanupAudio(ended = false, all = false) {
+        this.currentSources.forEach(source => {
+            if (!ended) {
+                source.mediaElement.pause();
+            }
+            source.disconnect();
+            source.mediaElement.src = '';
+            source.mediaElement.load(); // Load the empty source to force reset the audio element and free up memory
+            if (this.timeUpdateListener) {
+                source.mediaElement.removeEventListener('timeupdate', this.timeUpdateListener);
+            }
+            if (this.endedListener) {
+                source.mediaElement.removeEventListener('ended', this.endedListener);
+            }
+        });
+        if (all) {
+            this.nextSources.forEach(source => {
+                source.mediaElement.src = '';
+                source.mediaElement.load();
+            });
+        }
+    }
+    cleanupPanners() {
+        this.discs.forEach(disc => {
+            disc.panner.disconnect();
+        });
+    }
+    destroy() {
+        this.cleanupAudio(false, true);
+        this.cleanupPanners();
     }
 }
 
@@ -265,10 +325,11 @@ class NatureDenaturedAndFoundAgain {
 
         this.radius = 5;
         this.boundaryRadius = this.radius * 0.6667;
+        this.hardBoundaryRadius = this.radius * 1.3333;
         this.calculatePentagonPoints();
 
         this.audioManager = null;
-        this.listener = new Listener();
+        this.appListener = new Listener();
         this.visualizer = new Visualizer('visualizer');
 
         this.animationFrameId = null;
@@ -276,12 +337,12 @@ class NatureDenaturedAndFoundAgain {
 
         this.setupEventListeners();
 
-        this.visualizer.draw(this.discs, this.listener);
+        this.visualizer.draw(this.discs, this.appListener);
     }
 
     calculatePentagonPoints() {
         for (let i = 0; i < 5; i++) {
-            const angle = ((i * 2 * Math.PI) / 5 - Math.PI / 4) * 2;
+            const angle = (((i * 2 * Math.PI) + Math.PI) / 5 + Math.PI / 4) * 2;
             this.discs[i].point = new Vector2D(
                 this.radius * Math.cos(angle),
                 this.radius * Math.sin(angle)
@@ -295,7 +356,7 @@ class NatureDenaturedAndFoundAgain {
             if (match) {
                 const discIndex = +(parseInt(match[1]) - 1);
                 const trackIndex = +(parseInt(match[2]) - 1);
-                this.discs[discIndex].tracks[trackIndex].file = URL.createObjectURL(file);
+                this.discs[discIndex].tracks[trackIndex].file = file;
             }
         }
         return this.discs;
@@ -303,41 +364,49 @@ class NatureDenaturedAndFoundAgain {
 
     setupEventListeners() {
         const fileInput = document.getElementById('fileInput');
-        fileInput.addEventListener('change', () => {
+        fileInput.addEventListener('change', async () => {
             this.discs = this.createAudioSources(fileInput.files);
             this.audioManager = new AudioManager(this.audioContext, this.discs);
+            await this.audioManager.ready;
             document.getElementById('startButton').disabled = false;
+            document.getElementById('nextButton').disabled = false;
         });
         document.getElementById('startButton').addEventListener('click', () => this.start());
         document.getElementById('stopButton').addEventListener('click', () => this.stop());
+        document.getElementById('nextButton').addEventListener('click', () => this.next());
         window.addEventListener('load', () => {
             this.visualizer.resize();
-            this.visualizer.draw(this.discs, this.listener);
+            this.visualizer.draw(this.discs, this.appListener);
+        });
+        window.addEventListener('beforeunload', () => {
+            if (this.audioManager) {
+                this.audioManager.destroy();
+            }
         });
     }
 
     updateAudioListener() {
-        const listener = this.audioContext.listener;
+        const audioListener = this.audioContext.listener;
         const currentTime = this.audioContext.currentTime;
-        const forward = this.listener.getForwardVector();
+        const forward = this.appListener.getForwardVector();
 
-        listener.positionX.setValueAtTime(this.listener.position.x, currentTime);
-        listener.positionY.setValueAtTime(0, currentTime);
-        listener.positionZ.setValueAtTime(this.listener.position.z, currentTime);
+        audioListener.positionX.setValueAtTime(this.appListener.position.x, currentTime);
+        audioListener.positionY.setValueAtTime(0, currentTime);
+        audioListener.positionZ.setValueAtTime(this.appListener.position.z, currentTime);
 
-        listener.forwardX.setValueAtTime(forward.x, currentTime);
-        listener.forwardY.setValueAtTime(0, currentTime);
-        listener.forwardZ.setValueAtTime(forward.z, currentTime);
+        audioListener.forwardX.setValueAtTime(forward.x, currentTime);
+        audioListener.forwardY.setValueAtTime(0, currentTime);
+        audioListener.forwardZ.setValueAtTime(forward.z, currentTime);
 
-        listener.upX.setValueAtTime(0, currentTime);
-        listener.upY.setValueAtTime(1, currentTime);
-        listener.upZ.setValueAtTime(0, currentTime);
+        audioListener.upX.setValueAtTime(0, currentTime);
+        audioListener.upY.setValueAtTime(1, currentTime);
+        audioListener.upZ.setValueAtTime(0, currentTime);
     }
 
     update() {
-        this.listener.update(this.boundaryRadius);
+        this.appListener.update(this.boundaryRadius, this.hardBoundaryRadius);
         this.updateAudioListener();
-        this.visualizer.draw(this.discs, this.listener);
+        this.visualizer.draw(this.discs, this.appListener);
 
         if (this.isPlaying) {
             this.animationFrameId = requestAnimationFrame(() => this.update());
@@ -365,6 +434,21 @@ class NatureDenaturedAndFoundAgain {
             cancelAnimationFrame(this.animationFrameId);
             document.getElementById('startButton').disabled = false;
             document.getElementById('stopButton').disabled = true;
+        }
+    }
+
+    async next() {
+        if (this.isPlaying) {
+            await this.audioManager.next();
+        }
+    }
+
+    async destroy() {
+        if (this.audioManager) {
+            this.audioManager.destroy();
+        }
+        if (this.audioContext) {
+            await this.audioContext.close();
         }
     }
 }
