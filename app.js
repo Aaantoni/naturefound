@@ -112,28 +112,28 @@ class AudioManager {
             sources[index].connect(disc.panner).connect(this.context.destination);
         });
     }
-    play() {
-        this.currentSources.forEach(source => {
-            source.mediaElement.play().catch(console.error);
-        });
+    async play() {
+        await Promise.all(this.currentSources.map(source => {
+            return source.mediaElement.play().catch(console.error);
+        }));
         // Every track is exactly the same length, so we can use the first one to determine when to switch tracks
         this.currentSources[0].mediaElement.addEventListener('timeupdate', () => {
             if (this.currentSources[0].mediaElement.currentTime >= this.currentSources[0].mediaElement.duration - 12) {
                 this.nextSources = this.setupSources((this.currentTrack + 1) % 4);
             }
         });
-        this.currentSources[0].mediaElement.addEventListener('ended', () => {
+        this.currentSources[0].mediaElement.addEventListener('ended', async () => {
             this.setup(this.nextSources);
             this.currentSources = this.nextSources;
             this.currentTrack = (this.currentTrack + 1) % 4;
             this.nextSources = [];
-            this.play();
+            await this.play();
         });
     }
-    pause() {
-        this.currentSources.forEach(source => {
-            source.mediaElement.pause();
-        });
+    async pause() {
+        await Promise.all(this.currentSources.map(source => {
+            return source.mediaElement.pause();
+        }));
     }
 }
 
@@ -350,7 +350,7 @@ class NatureDenaturedAndFoundAgain {
         }
 
         if (!this.isPlaying) {
-            this.audioManager.play();
+            await this.audioManager.play();
             this.isPlaying = true;
             this.update();
             document.getElementById('startButton').disabled = true;
@@ -358,9 +358,9 @@ class NatureDenaturedAndFoundAgain {
         }
     }
 
-    stop() {
+    async stop() {
         if (this.isPlaying) {
-            this.audioManager.stop();
+            await this.audioManager.pause();
             this.isPlaying = false;
             cancelAnimationFrame(this.animationFrameId);
             document.getElementById('startButton').disabled = false;
