@@ -1,77 +1,100 @@
-const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-const listener = audioContext.listener;
+class Vector2D {
+    constructor(x = 0, z = 0) {
+        this.x = x;
+        this.z = z;
+    }
 
-const tracks = [
-    {filename: 'Disc 1 - Fissures In Green.mp3', disc: "Disc 1", title: "Fissures In Green", year: 2011},
-    {filename: 'Disc 4 - White Light Under The Door.mp3', disc: "Disc 4", title: "White Light Under The Door", year: 2014},
-    {filename: 'Disc 2 - Pathsplitter - Yellow-Red.mp3', disc: "Disc 2", title: "Pathsplitter (Yellow-Red)", year: 2012},
-    {filename: 'Disc 5 - Hellgrun - Small New World.mp3', disc: "Disc 5", title: "Hellgrün (Small New World)", year: 2015},
-    {filename: 'Disc 3 - Landscape In Black And Grey.mp3', disc: "Disc 3", title: "Landscape In Black And Grey", year: 2013}
-];
+    add(other) {
+        this.x += other.x;
+        this.z += other.z;
+        return this;
+    }
 
-const sources = [];
-const panners = [];
-const analysers = [];
-let animationFrameId = null;
-let isPlaying = false;
+    scale(factor) {
+        this.x *= factor;
+        this.z *= factor;
+        return this;
+    }
 
-// Calculate pentagon vertices (corners)
-const pentagonPoints = [];
-const radius = 5; // Distance from center to corners
-for (let i = 0; i < 5; i++) {
-    const angle = (i * 2 * Math.PI) / 5 + Math.PI / 2; // Start from bottom
-    pentagonPoints.push({
-        x: radius * Math.cos(angle),
-        z: radius * Math.sin(angle),
-        disc: tracks[i].disc,
-        title: tracks[i].title,
-        year: tracks[i].year
-    });
+    length() {
+        return Math.sqrt(this.x * this.x + this.z * this.z);
+    }
+
+    normalize() {
+        const len = this.length();
+        if (len > 0) {
+            this.x /= len;
+            this.z /= len;
+        }
+        return this;
+    }
+
+    clone() {
+        return new Vector2D(this.x, this.z);
+    }
 }
 
-// Listener state
-const listenerState = {
-    x: 0,
-    z: 0,
-    rotation: 0,
-    velocityX: 0,
-    velocityZ: 0,
-    rotationVelocity: 0
-};
+class Listener {
+    constructor() {
+        this.position = new Vector2D();
+        this.velocity = new Vector2D();
+        this.rotation = 0;
+        this.rotationVelocity = 0;
+    }
 
-// Setup audio sources and panners
-async function setupAudio() {
-    for (let i = 0; i < tracks.length; i++) {
-        const response = await fetch(tracks[i].filename);
-        const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    update(bounds) {
+        // Update velocities with random accelerations
+        this.velocity.add(new Vector2D(
+            (Math.random() - 0.5) * 0.005,
+            (Math.random() - 0.5) * 0.005
+        ));
+        this.rotationVelocity += (Math.random() - 0.5) * 0.005;
+
+        // Apply damping
+        this.velocity.scale(0.97);
+        this.rotationVelocity *= 0.97;
+
+        // Update position and rotation
+        this.position.add(this.velocity);
+        this.rotation += this.rotationVelocity;
+
+        // Keep within bounds
+        const distanceFromCenter = this.position.length();
+        if (distanceFromCenter > bounds) {
+            const angle = Math.atan2(this.position.z, this.position.x);
+            this.position.x = bounds * Math.cos(angle);
+            this.position.z = bounds * Math.sin(angle);
+            this.velocity.scale(-0.5);
+        }
+    }
+
+    getForwardVector() {
+        return new Vector2D(Math.sin(this.rotation), Math.cos(this.rotation));
+    }
+}
+
+class AudioSource {
+    constructor(context, position, trackPath) {
+        this.context = context;
+        this.position = position;
+        this.trackPath = trackPath;
+        this.source = null;
+        this.panner = null;
+        this.audioElement = null;
+    }
+
+    async setup() {
+        // Create audio element
+        this.audioElement = new Audio(this.trackPath);
+        this.audioElement.loop = true;
         
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.loop = true;
+        // Create media element source
+        this.source = this.context.createMediaElementSource(this.audioElement);
 
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048;
-        const dataArray = new Uint8Array(analyser.fftSize);
-
-        source.connect(analyser);
-        analyser.connect(audioContext.destination);
-
-        // compute approximate RMS amplitude
-        const getRMS = () => {
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                const sample = (dataArray[i] - 128) / 128; // Normalize to -1 to 1 range
-                sum += sample * sample; // Square the sample
-            }
-            return Math.sqrt(sum / dataArray.length);
-        };
-        
-        const panner = new PannerNode(audioContext, {
-            positionX: pentagonPoints[i].x,
+        this.panner = new PannerNode(this.context, {
+            positionX: this.position.x,
             positionY: 0,
-            positionZ: pentagonPoints[i].z,
+            positionZ: this.position.z,
             refDistance: 1,
             maxDistance: 15,
             rolloffFactor: 1,
@@ -79,190 +102,195 @@ async function setupAudio() {
             panningModel: 'HRTF'
         });
 
-        source.connect(panner).connect(audioContext.destination);
-        sources.push(source);
-        panners.push(panner);
-        analysers.push(analyser);
-    }
-}
-
-// Update listener position and rotation
-function updateListener() {
-    // Update velocities with random accelerations
-    listenerState.velocityX += (Math.random() - 0.5) * 0.005;
-    listenerState.velocityZ += (Math.random() - 0.5) * 0.005;
-    listenerState.rotationVelocity += (Math.random() - 0.5) * 0.01;
-
-    // Apply damping
-    listenerState.velocityX *= 0.97;
-    listenerState.velocityZ *= 0.97;
-    listenerState.rotationVelocity *= 0.98;
-
-    // Update position and rotation
-    listenerState.x += listenerState.velocityX;
-    listenerState.z += listenerState.velocityZ;
-    listenerState.rotation += listenerState.rotationVelocity;
-
-    // Keep listener within pentagon bounds (simple circular boundary)
-    const distanceFromCenter = Math.sqrt(listenerState.x ** 2 + listenerState.z ** 2);
-    const boundary = radius * 0.5;
-    if (distanceFromCenter > boundary) {
-        const angle = Math.atan2(listenerState.z, listenerState.x);
-        listenerState.x = boundary * Math.cos(angle);
-        listenerState.z = boundary * Math.sin(angle);
-        // Reverse velocities when hitting boundary
-        listenerState.velocityX *= -0.5;
-        listenerState.velocityZ *= -0.5;
+        this.source.connect(this.panner).connect(this.context.destination);
     }
 
-    // Update listener position and orientation
-    listener.positionX.setValueAtTime(listenerState.x, audioContext.currentTime);
-    listener.positionY.setValueAtTime(0, audioContext.currentTime);
-    listener.positionZ.setValueAtTime(listenerState.z, audioContext.currentTime);
-
-    // Calculate forward direction based on rotation
-    const forwardX = Math.sin(listenerState.rotation);
-    const forwardZ = Math.cos(listenerState.rotation);
-    
-    listener.forwardX.setValueAtTime(forwardX, audioContext.currentTime);
-    listener.forwardY.setValueAtTime(0, audioContext.currentTime);
-    listener.forwardZ.setValueAtTime(forwardZ, audioContext.currentTime);
-    
-    listener.upX.setValueAtTime(0, audioContext.currentTime);
-    listener.upY.setValueAtTime(1, audioContext.currentTime);
-    listener.upZ.setValueAtTime(0, audioContext.currentTime);
-
-    // Update position display
-    updatePositionsDisplay();
-
-    // Draw visualization
-    drawVisualization();
-
-    if (isPlaying) {
-        animationFrameId = requestAnimationFrame(updateListener);
+    start() {
+        this.audioElement?.play().catch(console.error);
     }
-}
 
-// Update the positions display in the HTML
-function updatePositionsDisplay() {
-    const positions = document.querySelectorAll('#positionsList span');
-    positions[0].textContent = `(${listenerState.x.toFixed(2)}, ${listenerState.z.toFixed(2)})`;
-    for (let i = 0; i < pentagonPoints.length; i++) {
-        positions[i + 1].textContent = `(${pentagonPoints[i].x.toFixed(2)}, ${pentagonPoints[i].z.toFixed(2)})`;
-    }
-}
-
-// Draw the visualization on canvas
-function drawVisualization() {
-    const canvas = document.getElementById('visualizer');
-    const ctx = canvas.getContext('2d');
-    const scale = 40; // Pixels per unit
-
-    // Set canvas size
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Translate to center
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    
-    // Draw pentagon
-    ctx.beginPath();
-    ctx.moveTo(pentagonPoints[0].x * scale, pentagonPoints[0].z * scale);
-    for (let i = 1; i < pentagonPoints.length; i++) {
-        ctx.lineTo(pentagonPoints[i].x * scale, pentagonPoints[i].z * scale);
-    }
-    ctx.closePath();
-    ctx.strokeStyle = '#666';
-    ctx.stroke();
-
-    // Draw sound sources
-    pentagonPoints.forEach((point, i) => {
-        ctx.fillStyle = '#f00';
-        ctx.beginPath();
-        ctx.arc(point.x * scale, point.z * scale, 5, 0, Math.PI * 2);
-        ctx.fill();
-        // Draw labels
-        // Determine text color based on background contrast
-        // Get the canvas background color (assuming it's the body background or canvas background)
-        const backgroundColor = window.getComputedStyle(canvas.parentNode).backgroundColor;
-        
-        // Parse the RGB values
-        let r, g, b;
-        if (backgroundColor.startsWith('rgb')) {
-            [r, g, b] = backgroundColor.match(/\d+/g).map(Number);
-        } else {
-            // Default to white background if we can't parse
-            r = 255; g = 255; b = 255;
+    stop() {
+        if (this.audioElement) {
+            this.audioElement.pause();
+            this.audioElement.currentTime = 0;
         }
-        
-        // Calculate luminance - standard formula for perceived brightness
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        
-        // Use black text for bright backgrounds, white text for dark backgrounds
-        ctx.fillStyle = luminance > 0.5 ? '#000' : '#fff';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        const labelY = point.z * scale + 20;
-        ctx.fillText(`${point.disc}`, point.x * scale, labelY);
-        ctx.fillText(`${point.title}`, point.x * scale, labelY + 15);
-        ctx.fillText(`${point.year}`, point.x * scale, labelY + 30);
-    });
-
-    // Draw listener
-    ctx.fillStyle = '#00f';
-    ctx.beginPath();
-    ctx.arc(listenerState.x * scale, listenerState.z * scale, 8, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Draw listener direction
-    ctx.beginPath();
-    ctx.moveTo(listenerState.x * scale, listenerState.z * scale);
-    ctx.lineTo(
-        (listenerState.x + Math.sin(listenerState.rotation)) * scale,
-        (listenerState.z + Math.cos(listenerState.rotation)) * scale
-    );
-    ctx.strokeStyle = '#00f';
-    ctx.stroke();
-
-    // Reset transform
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
 }
 
-// Event Listeners
-document.getElementById('startButton').addEventListener('click', async () => {
-    if (audioContext.state === 'suspended') {
-        await audioContext.resume();
+class Visualizer {
+    constructor(canvasId, scale = 40) {
+        this.canvas = document.getElementById(canvasId);
+        this.ctx = this.canvas.getContext('2d');
+        this.scale = scale;
     }
-    
-    if (!isPlaying) {
-        await setupAudio();
-        sources.forEach(source => source.start());
-        isPlaying = true;
-        updateListener();
-        document.getElementById('startButton').disabled = true;
-        document.getElementById('stopButton').disabled = false;
-    }
-});
 
-document.getElementById('stopButton').addEventListener('click', () => {
-    if (isPlaying) {
-        sources.forEach(source => source.stop());
-        sources.length = 0;
-        panners.length = 0;
-        isPlaying = false;
-        cancelAnimationFrame(animationFrameId);
-        document.getElementById('startButton').disabled = false;
-        document.getElementById('stopButton').disabled = true;
+    resize() {
+        this.canvas.width = this.canvas.offsetWidth;
+        this.canvas.height = this.canvas.offsetHeight;
     }
-});
 
-// Initial canvas setup
-window.addEventListener('load', () => {
-    const canvas = document.getElementById('visualizer');
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    drawVisualization();
-});
+    draw(pentagonPoints, listener) {
+        this.resize();
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+
+        // Draw pentagon
+        this.ctx.beginPath();
+        this.ctx.moveTo(pentagonPoints[0].x * this.scale, pentagonPoints[0].z * this.scale);
+        for (let i = 1; i < pentagonPoints.length; i++) {
+            this.ctx.lineTo(pentagonPoints[i].x * this.scale, pentagonPoints[i].z * this.scale);
+        }
+        this.ctx.closePath();
+        this.ctx.strokeStyle = '#666';
+        this.ctx.stroke();
+
+        // Draw sound sources
+        pentagonPoints.forEach(point => {
+            this.ctx.fillStyle = '#f00';
+            this.ctx.beginPath();
+            this.ctx.arc(point.x * this.scale, point.z * this.scale, 5, 0, Math.PI * 2);
+            this.ctx.fill();
+        });
+
+        // Draw listener
+        this.ctx.fillStyle = '#00f';
+        this.ctx.beginPath();
+        this.ctx.arc(
+            listener.position.x * this.scale, 
+            listener.position.z * this.scale, 
+            8, 0, Math.PI * 2
+        );
+        this.ctx.fill();
+
+        // Draw listener direction
+        const forward = listener.getForwardVector();
+        this.ctx.beginPath();
+        this.ctx.moveTo(listener.position.x * this.scale, listener.position.z * this.scale);
+        this.ctx.lineTo(
+            (listener.position.x + forward.x) * this.scale,
+            (listener.position.z + forward.z) * this.scale
+        );
+        this.ctx.strokeStyle = '#00f';
+        this.ctx.stroke();
+
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+}
+
+class SpatialAudioExperience {
+    constructor() {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.tracks = [
+            'Disc 1 - Fissures In Green.mp3',
+            'Disc 2 - Pathsplitter - Yellow-Red.mp3',
+            'Disc 3 - Landscape In Black And Grey.mp3',
+            'Disc 4 - White Light Under The Door.mp3',
+            'Disc 5 - Hellgrun - Small New World.mp3'
+        ];
+        
+        this.radius = 5;
+        this.boundaryRadius = this.radius * 0.6667;
+        this.pentagonPoints = this.calculatePentagonPoints();
+        
+        this.listener = new Listener();
+        this.audioSources = this.createAudioSources();
+        this.visualizer = new Visualizer('visualizer');
+        
+        this.animationFrameId = null;
+        this.isPlaying = false;
+
+        this.setupEventListeners();
+    }
+
+    calculatePentagonPoints() {
+        const points = [];
+        for (let i = 0; i < 5; i++) {
+            const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+            points.push(new Vector2D(
+                this.radius * Math.cos(angle),
+                this.radius * Math.sin(angle)
+            ));
+        }
+        return points;
+    }
+
+    createAudioSources() {
+        return this.tracks.map((track, i) => 
+            new AudioSource(this.audioContext, this.pentagonPoints[i], track)
+        );
+    }
+
+    setupEventListeners() {
+        document.getElementById('startButton').addEventListener('click', () => this.start());
+        document.getElementById('stopButton').addEventListener('click', () => this.stop());
+        window.addEventListener('load', () => this.visualizer.resize());
+    }
+
+    updatePositionsDisplay() {
+        const positions = document.querySelectorAll('#positionsList span');
+        positions[0].textContent = `(${this.listener.position.x.toFixed(2)}, ${this.listener.position.z.toFixed(2)})`;
+        this.pentagonPoints.forEach((point, i) => {
+            positions[i + 1].textContent = `(${point.x.toFixed(2)}, ${point.z.toFixed(2)})`;
+        });
+    }
+
+    updateAudioListener() {
+        const listener = this.audioContext.listener;
+        const currentTime = this.audioContext.currentTime;
+        const forward = this.listener.getForwardVector();
+
+        listener.positionX.setValueAtTime(this.listener.position.x, currentTime);
+        listener.positionY.setValueAtTime(0, currentTime);
+        listener.positionZ.setValueAtTime(this.listener.position.z, currentTime);
+
+        listener.forwardX.setValueAtTime(forward.x, currentTime);
+        listener.forwardY.setValueAtTime(0, currentTime);
+        listener.forwardZ.setValueAtTime(forward.z, currentTime);
+
+        listener.upX.setValueAtTime(0, currentTime);
+        listener.upY.setValueAtTime(1, currentTime);
+        listener.upZ.setValueAtTime(0, currentTime);
+    }
+
+    update() {
+        this.listener.update(this.boundaryRadius);
+        this.updateAudioListener();
+        this.updatePositionsDisplay();
+        this.visualizer.draw(this.pentagonPoints, this.listener);
+
+        if (this.isPlaying) {
+            this.animationFrameId = requestAnimationFrame(() => this.update());
+        }
+    }
+
+    async start() {
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+
+        if (!this.isPlaying) {
+            // Since we're using HTML Audio elements, we can set up all sources at construction
+            if (!this.audioSources[0].source) {
+                await Promise.all(this.audioSources.map(source => source.setup()));
+            }
+            this.audioSources.forEach(source => source.start());
+            this.isPlaying = true;
+            this.update();
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+        }
+    }
+
+    stop() {
+        if (this.isPlaying) {
+            this.audioSources.forEach(source => source.stop());
+            this.isPlaying = false;
+            cancelAnimationFrame(this.animationFrameId);
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+        }
+    }
+}
+
+// Initialize the experience
+const experience = new SpatialAudioExperience();
