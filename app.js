@@ -160,6 +160,7 @@ class AudioManager {
         this.currentSources = [];
         this.nextSources = [];
         this.ready = this.init();
+        this.nextPrepared = false;
     }
 
     async init() {
@@ -193,7 +194,6 @@ class AudioManager {
                 audioFile.preload = 'auto';
             });
             const source = this.context.createMediaElementSource(audioFile);
-            URL.revokeObjectURL(blobUrl);
             return source;
         }));
         return sources;
@@ -226,17 +226,24 @@ class AudioManager {
         await Promise.all(this.currentSources.map(source => {
             return source.mediaElement.play().catch(console.error);
         }));
+        this.nextPrepared = false;
         this.timeUpdateListener = async () => {
-            // Every track is exactly the same length, so we can use just the first one to determine when to switch tracks
-            if (this.currentSources[0].mediaElement.currentTime >= this.currentSources[0].mediaElement.duration - 12) {
+            const media = this.currentSources[0].mediaElement;
+            if (!this.nextPrepared && media.currentTime >= media.duration - 1) {
+                this.nextPrepared = true;
                 await this.prepareNextSources();
             }
         };
         this.endedListener = async () => {
+            if (!this.nextPrepared) {
+                await this.prepareNextSources();
+            }
             await this.playNextSources(this.nextSources, true);
         };
-        this.currentSources[0].mediaElement.addEventListener('timeupdate', this.timeUpdateListener);
-        this.currentSources[0].mediaElement.addEventListener('ended', this.endedListener);
+        this.currentSources.forEach(source => {
+            source.mediaElement.addEventListener('timeupdate', this.timeUpdateListener);
+            source.mediaElement.addEventListener('ended', this.endedListener);
+        });
     }
 
     async pause() {
@@ -256,6 +263,11 @@ class AudioManager {
                 source.mediaElement.pause();
             }
             source.disconnect();
+            // Revoke blob URL when cleaning up to free memory
+            const blobUrl = source.mediaElement.src;
+            if (blobUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(blobUrl);
+            }
             source.mediaElement.src = '';
             source.mediaElement.load(); // Load the empty source to force reset the audio element and free up memory
             if (this.timeUpdateListener) {
@@ -267,6 +279,11 @@ class AudioManager {
         });
         if (all) {
             this.nextSources.forEach(source => {
+                // Revoke blob URL for queued sources
+                const blobUrl = source.mediaElement.src;
+                if (blobUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(blobUrl);
+                }
                 source.mediaElement.src = '';
                 source.mediaElement.load();
             });
