@@ -1,3 +1,13 @@
+const GOLDEN_SCALE = (25 / 720); // Scale for the canvas size
+const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2; // Golden ratio for the pentagon
+const RADIUS = 10;
+const DIAGONAL = 2 * RADIUS * Math.sin((2 * Math.PI) / 5); // Diagonal length of the pentagon
+const LONGER_SEGMENT = DIAGONAL / GOLDEN_RATIO;
+const SHORTER_SEGMENT = LONGER_SEGMENT / GOLDEN_RATIO;
+const SHORTEST_SEGMENT = SHORTER_SEGMENT / GOLDEN_RATIO;
+const TRIANGLE_HEIGHT = Math.sqrt(Math.pow(SHORTER_SEGMENT, 2) - Math.pow((SHORTEST_SEGMENT / 2), 2));
+console.log(SHORTER_SEGMENT, TRIANGLE_HEIGHT);
+
 class Vector2D {
     constructor(x = 0, z = 0) {
         this.x = x;
@@ -22,21 +32,47 @@ class Vector2D {
 }
 
 class Visualizer {
-    constructor(canvasId, scale = 40) {
+    constructor(canvasId, audioManager, boundaries, scale = 25) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
+        this.audioManager = audioManager;
+        this.boundaries = boundaries;
         this.scale = scale;
+        this.resize();
     }
 
     resize() {
-        this.canvas.width = this.canvas.offsetWidth;
-        this.canvas.height = this.canvas.offsetHeight;
+        this.canvas.width = this.canvas.offsetWidth - 2; // 1px border on each side
+        this.canvas.height = this.canvas.offsetHeight - 2; // 1px border on each side
+        this.scale = Math.min(this.canvas.width, this.canvas.height) * GOLDEN_SCALE;
     }
 
     draw(discs, appListener) {
-        this.resize();
+        // Clear canvas
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+        // Set canvas size and scale
+        this.ctx.setTransform(1, 0, 0, 1, this.canvas.width / 2, this.canvas.height / 2);
+
+        // Draw boundaries
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, this.scale * this.boundaries.radius, 0, Math.PI * 2);
+        this.ctx.strokeStyle = '#666';
+        this.ctx.stroke();
+
+        // Draw soft boundary
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, this.scale * this.boundaries.softBoundary, 0, Math.PI * 2);
+        this.ctx.strokeStyle = '#888';
+        this.ctx.setLineDash([5, 5]);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        // Draw hard boundary
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, this.scale * this.boundaries.hardBoundary, 0, Math.PI * 2);
+        this.ctx.strokeStyle = '#444';
+        this.ctx.stroke();
 
         // Draw pentagon
         this.ctx.beginPath();
@@ -58,6 +94,7 @@ class Visualizer {
             this.ctx.font = '12px Arial';
             this.ctx.textAlign = 'center';
             this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 20);
+            this.ctx.fillText(disc.tracks[this.audioManager.currentTrack].trackTitle, disc.point.x * this.scale, disc.point.z * this.scale + 35);
         });
 
         // Draw listener
@@ -80,8 +117,6 @@ class Visualizer {
         );
         this.ctx.strokeStyle = '#00f';
         this.ctx.stroke();
-
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 }
 
@@ -91,6 +126,7 @@ class Listener {
         this.velocity = new Vector2D();
         this.rotation = 0;
         this.rotationVelocity = 0;
+        this.hitBounds = false;
     }
 
     update(bounds, hardBounds, keys) {
@@ -104,9 +140,16 @@ class Listener {
                 (Math.random() - 0.5) * 0.005
             ));
             this.rotationVelocity += (Math.random() - 0.5) * 0.005;
-            
+
             if (distanceFromCenter > bounds) {
                 this.position.add(this.getCenterVector().scale(-0.01));
+                this.hitBounds = true;
+            } else if (this.hitBounds) {
+                this.position.add(this.getCenterVector().scale(-0.01));
+            }
+
+            if (distanceFromCenter <= 1) {
+                this.hitBounds = false;
             }
 
             // Apply damping
@@ -159,7 +202,7 @@ class AudioManager {
         this.setupPanners();
         this.currentSources = [];
         this.nextSources = [];
-        this.ready = this.init();
+        // this.ready = this.init();
         this.nextPrepared = false;
     }
 
@@ -174,10 +217,10 @@ class AudioManager {
                 positionX: disc.point.x,
                 positionY: 0,
                 positionZ: disc.point.z,
-                refDistance: 1,
-                maxDistance: 10,
+                refDistance: SHORTER_SEGMENT,
+                maxDistance: 2 * SHORTER_SEGMENT,
                 rolloffFactor: 1,
-                distanceModel: 'inverse',
+                distanceModel: 'linear',
                 panningModel: 'HRTF'
             });
         });
@@ -186,15 +229,35 @@ class AudioManager {
     async setupSources(track = this.currentTrack) {
         const sources = await Promise.all(this.discs.map(async disc => {
             const blobUrl = URL.createObjectURL(disc.tracks[track].file);
-            const audioFile = new Audio(blobUrl);
-            await new Promise((resolve, reject) => {
-                audioFile.addEventListener('canplaythrough', resolve, { once: true });
-                audioFile.addEventListener('error', reject, { once: true });
-                audioFile.crossOrigin = 'anonymous';
-                audioFile.preload = 'auto';
-            });
-            const source = this.context.createMediaElementSource(audioFile);
-            return source;
+            const audioFile = new Audio();
+            audioFile.src = blobUrl;
+
+            try {
+                await new Promise((resolve, reject) => {
+                    const onError = () => {
+                        URL.revokeObjectURL(blobUrl);
+                        reject(new Error(`Failed to load audio track ${track}`));
+                    };
+
+                    audioFile.addEventListener('canplaythrough', () => {
+                        URL.revokeObjectURL(blobUrl);
+                        resolve();
+                    }, { once: true });
+
+                    audioFile.addEventListener('error', onError, { once: true });
+                    audioFile.crossOrigin = 'anonymous';
+                    audioFile.preload = 'auto';
+                });
+
+                const source = this.context.createMediaElementSource(audioFile);
+                return source;
+            } catch (error) {
+                console.error(error);
+                // Clean up on error
+                audioFile.src = '';
+                audioFile.load();
+                throw error;
+            }
         }));
         return sources;
     }
@@ -227,9 +290,14 @@ class AudioManager {
             return source.mediaElement.play().catch(console.error);
         }));
         this.nextPrepared = false;
+        if (this.timeUpdateListener) {
+            this.currentSources.forEach(source => {
+                source.mediaElement.removeEventListener('timeupdate', this.timeUpdateListener);
+            });
+        }
         this.timeUpdateListener = async () => {
             const media = this.currentSources[0].mediaElement;
-            if (!this.nextPrepared && media.currentTime >= media.duration - 1) {
+            if (!this.nextPrepared && media.currentTime >= media.duration - 12) {
                 this.nextPrepared = true;
                 await this.prepareNextSources();
             }
@@ -242,7 +310,7 @@ class AudioManager {
         };
         this.currentSources.forEach(source => {
             source.mediaElement.addEventListener('timeupdate', this.timeUpdateListener);
-            source.mediaElement.addEventListener('ended', this.endedListener);
+            source.mediaElement.addEventListener('ended', this.endedListener, { once: true});
         });
     }
 
@@ -258,32 +326,21 @@ class AudioManager {
     }
 
     cleanupAudio(ended = false, all = false) {
+        if (this.timeUpdateListener) {
+            this.currentSources.forEach(source => {
+                source.mediaElement.removeEventListener('timeupdate', this.timeUpdateListener);
+            });
+        }
         this.currentSources.forEach(source => {
             if (!ended) {
                 source.mediaElement.pause();
             }
             source.disconnect();
-            // Revoke blob URL when cleaning up to free memory
-            const blobUrl = source.mediaElement.src;
-            if (blobUrl.startsWith('blob:')) {
-                URL.revokeObjectURL(blobUrl);
-            }
             source.mediaElement.src = '';
             source.mediaElement.load(); // Load the empty source to force reset the audio element and free up memory
-            if (this.timeUpdateListener) {
-                source.mediaElement.removeEventListener('timeupdate', this.timeUpdateListener);
-            }
-            if (this.endedListener) {
-                source.mediaElement.removeEventListener('ended', this.endedListener);
-            }
         });
         if (all) {
             this.nextSources.forEach(source => {
-                // Revoke blob URL for queued sources
-                const blobUrl = source.mediaElement.src;
-                if (blobUrl.startsWith('blob:')) {
-                    URL.revokeObjectURL(blobUrl);
-                }
                 source.mediaElement.src = '';
                 source.mediaElement.load();
             });
@@ -364,14 +421,20 @@ class NatureDenaturedAndFoundAgain {
             }
         ];
 
-        this.radius = 5;
-        this.boundaryRadius = this.radius * 0.4;
-        this.hardBoundaryRadius = this.radius * 1.3333;
+        this.radius = RADIUS;
+        this.boundaryRadius = this.radius / (GOLDEN_RATIO * GOLDEN_RATIO);
+        this.hardBoundaryRadius = this.boundaryRadius * 4;
         this.calculatePentagonPoints();
 
-        this.audioManager = null;
+        this.boundaries = {
+            "radius": this.radius,
+            "softBoundary": this.boundaryRadius,
+            "hardBoundary": this.hardBoundaryRadius
+        };
+
+        this.audioManager = new AudioManager(this.audioContext, this.discs);
         this.appListener = new Listener();
-        this.visualizer = new Visualizer('visualizer');
+        this.visualizer = new Visualizer('visualizer', this.audioManager, this.boundaries);
 
         this.animationFrameId = null;
         this.isPlaying = false;
@@ -407,21 +470,20 @@ class NatureDenaturedAndFoundAgain {
     }
 
     setupEventListeners() {
+        window.addEventListener('load', () => {
+            this.visualizer.resize();
+            this.visualizer.draw(this.discs, this.appListener);
+        });
         const fileInput = document.getElementById('fileInput');
         fileInput.addEventListener('change', async () => {
             this.discs = this.createAudioSources(fileInput.files);
-            this.audioManager = new AudioManager(this.audioContext, this.discs);
-            await this.audioManager.ready;
+            await this.audioManager.init();
             document.getElementById('startButton').disabled = false;
             document.getElementById('nextButton').disabled = false;
         });
         document.getElementById('startButton').addEventListener('click', () => this.start());
         document.getElementById('stopButton').addEventListener('click', () => this.stop());
         document.getElementById('nextButton').addEventListener('click', () => this.next());
-        window.addEventListener('load', () => {
-            this.visualizer.resize();
-            this.visualizer.draw(this.discs, this.appListener);
-        });
         window.addEventListener('beforeunload', () => {
             if (this.audioManager) {
                 this.audioManager.destroy();
@@ -459,6 +521,7 @@ class NatureDenaturedAndFoundAgain {
     update() {
         this.appListener.update(this.boundaryRadius, this.hardBoundaryRadius, this.keys);
         this.updateAudioListener();
+        this.visualizer.resize();
         this.visualizer.draw(this.discs, this.appListener);
 
         if (this.isPlaying) {
