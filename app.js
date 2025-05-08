@@ -1,12 +1,11 @@
-const GOLDEN_SCALE = (25 / 720); // Scale for the canvas size
+const GOLDEN_SCALE = (20 / 720); // 20 at 720 canvas width
 const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2; // Golden ratio for the pentagon
 const RADIUS = 10;
 const DIAGONAL = 2 * RADIUS * Math.sin((2 * Math.PI) / 5); // Diagonal length of the pentagon
 const LONGER_SEGMENT = DIAGONAL / GOLDEN_RATIO;
 const SHORTER_SEGMENT = LONGER_SEGMENT / GOLDEN_RATIO;
 const SHORTEST_SEGMENT = SHORTER_SEGMENT / GOLDEN_RATIO;
-const TRIANGLE_HEIGHT = Math.sqrt(Math.pow(SHORTER_SEGMENT, 2) - Math.pow((SHORTEST_SEGMENT / 2), 2));
-console.log(SHORTER_SEGMENT, TRIANGLE_HEIGHT);
+
 
 class Vector2D {
     constructor(x = 0, z = 0) {
@@ -32,7 +31,7 @@ class Vector2D {
 }
 
 class Visualizer {
-    constructor(canvasId, audioManager, boundaries, scale = 25) {
+    constructor(canvasId, audioManager, boundaries, scale = 20) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.audioManager = audioManager;
@@ -54,16 +53,10 @@ class Visualizer {
         // Set canvas size and scale
         this.ctx.setTransform(1, 0, 0, 1, this.canvas.width / 2, this.canvas.height / 2);
 
-        // Draw boundaries
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, this.scale * this.boundaries.radius, 0, Math.PI * 2);
-        this.ctx.strokeStyle = '#666';
-        this.ctx.stroke();
-
         // Draw soft boundary
         this.ctx.beginPath();
         this.ctx.arc(0, 0, this.scale * this.boundaries.softBoundary, 0, Math.PI * 2);
-        this.ctx.strokeStyle = '#888';
+        this.ctx.strokeStyle = '#ffffff08';
         this.ctx.setLineDash([5, 5]);
         this.ctx.stroke();
         this.ctx.setLineDash([]);
@@ -71,52 +64,64 @@ class Visualizer {
         // Draw hard boundary
         this.ctx.beginPath();
         this.ctx.arc(0, 0, this.scale * this.boundaries.hardBoundary, 0, Math.PI * 2);
-        this.ctx.strokeStyle = '#444';
-        this.ctx.stroke();
-
-        // Draw pentagon
-        this.ctx.beginPath();
-        this.ctx.moveTo(discs[0].point.x * this.scale, discs[0].point.z * this.scale);
-        for (let i = 1; i < discs.length; i++) {
-            this.ctx.lineTo(discs[i].point.x * this.scale, discs[i].point.z * this.scale);
-        }
-        this.ctx.closePath();
-        this.ctx.strokeStyle = '#666';
+        this.ctx.strokeStyle = '#ffffff10';
         this.ctx.stroke();
 
         // Draw sound sources
-        discs.forEach(disc => {
+        discs.forEach((disc, index) => {
+            const loudness = this.audioManager.getLoudness(index);
             this.ctx.fillStyle = '#f00';
             this.ctx.beginPath();
             this.ctx.arc(disc.point.x * this.scale, disc.point.z * this.scale, 5, 0, Math.PI * 2);
             this.ctx.fill();
+            this.ctx.save();
+            this.ctx.shadowColor = 'rgba(255, 0, 0, 0.5)';
+            this.ctx.shadowBlur = this.scale;
+            this.ctx.filter = `blur(${this.scale}px)`;
+            this.ctx.globalAlpha = 0.25;
+            this.ctx.beginPath();
+            this.ctx.arc(disc.point.x * this.scale, disc.point.z * this.scale, loudness * SHORTEST_SEGMENT * this.scale, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.filter = 'none';
+            this.ctx.globalAlpha = 1;
+            this.ctx.restore();
             this.ctx.fillStyle = '#fff';
-            this.ctx.font = '12px Arial';
+            this.ctx.font = 'italic 12px Libre Baskerville';
             this.ctx.textAlign = 'center';
             this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 20);
             this.ctx.fillText(disc.tracks[this.audioManager.currentTrack].trackTitle, disc.point.x * this.scale, disc.point.z * this.scale + 35);
         });
 
-        // Draw listener
-        this.ctx.fillStyle = '#00f';
-        this.ctx.beginPath();
-        this.ctx.arc(
-            appListener.position.x * this.scale,
-            appListener.position.z * this.scale,
-            8, 0, Math.PI * 2
-        );
-        this.ctx.fill();
-
-        // Draw listener direction
+        // Draw listener pointer
+        this.ctx.fillStyle = '#4f5941';
+        const px = appListener.position.x * this.scale;
+        const pz = appListener.position.z * this.scale;
         const forward = appListener.getForwardVector();
+        // normalize forward
+        const len = Math.hypot(forward.x, forward.z);
+        const ux = forward.x / len, uz = forward.z / len;
+        // perpendicular to forward
+        const perpX = uz, perpZ = -ux;
+        // dimensions (in screen px)
+        const tipLen = 12, baseDist = -8, notchDist = -4;
+        const halfW = 6;
+        // compute points
+        const tipX       = px + ux * tipLen;
+        const tipZ       = pz + uz * tipLen;
+        const baseRX     = px + ux * baseDist + perpX * halfW;
+        const baseRZ     = pz + uz * baseDist + perpZ * halfW;
+        const notchX     = px + ux * notchDist;
+        const notchZ     = pz + uz * notchDist;
+        const baseLX     = px + ux * baseDist - perpX * halfW;
+        const baseLZ     = pz + uz * baseDist - perpZ * halfW;
+        // draw shape
         this.ctx.beginPath();
-        this.ctx.moveTo(appListener.position.x * this.scale, appListener.position.z * this.scale);
-        this.ctx.lineTo(
-            (appListener.position.x + forward.x) * this.scale,
-            (appListener.position.z + forward.z) * this.scale
-        );
-        this.ctx.strokeStyle = '#00f';
-        this.ctx.stroke();
+        this.ctx.moveTo(tipX, tipZ);
+        this.ctx.lineTo(baseRX, baseRZ);
+        this.ctx.lineTo(notchX, notchZ);
+        this.ctx.lineTo(baseLX, baseLZ);
+        this.ctx.closePath();
+        this.ctx.fill();
     }
 }
 
@@ -162,16 +167,16 @@ class Listener {
         } else {
             // Update velocities based on key presses
             if (keys["ArrowUp"] || keys["w"]) {
-                this.position.add(this.getForwardVector().scale(0.01));
+                this.position.add(this.getForwardVector().scale(0.015));
             }
             if (keys["ArrowDown"] || keys["s"]) {
-                this.position.add(this.getForwardVector().scale(-0.01));
+                this.position.add(this.getForwardVector().scale(-0.015));
             }
             if (keys["ArrowLeft"] || keys["a"]) {
-                this.rotation += 0.01;
+                this.rotation += 0.015;
             }
             if (keys["ArrowRight"] || keys["d"]) {
-                this.rotation -= 0.01;
+                this.rotation -= 0.015;
             }
         }
 
@@ -202,6 +207,10 @@ class AudioManager {
         this.setupPanners();
         this.currentSources = [];
         this.nextSources = [];
+        this.peakLevels = new Array(discs.length).fill(0);
+        this.attackTime = 0.005; // Quick attack (5ms)
+        this.releaseTime = 0.2;  // Slower release (200ms)
+        this.lastFrameTime = new Array(discs.length).fill(0);
         // this.ready = this.init();
         this.nextPrepared = false;
     }
@@ -267,8 +276,18 @@ class AudioManager {
             // If there is already a source connected to the panner, disconnect it
             if (disc.panner.numberOfInputs > 0) {
                 disc.panner.disconnect();
+            }// Create analyzer node if it doesn't exist
+            if (!disc.analyzer) {
+                disc.analyzer = this.context.createAnalyser();
+                disc.analyzer.fftSize = 2048;
+                disc.analyzer.minDecibels = -90;
+                disc.analyzer.maxDecibels = 0;
+                disc.analyzer.smoothingTimeConstant = 1;
             }
-            sources[index].connect(disc.panner).connect(this.context.destination);
+            // Connect source -> analyzer -> panner -> destination
+            sources[index].connect(disc.analyzer);
+            disc.analyzer.connect(disc.panner);
+            disc.panner.connect(this.context.destination);
         });
     }
 
@@ -323,6 +342,33 @@ class AudioManager {
     async next() {
         await this.prepareNextSources();
         await this.playNextSources();
+    }
+
+    getLoudness(discIndex) {
+        const disc = this.discs[discIndex];
+        if (!disc.analyzer) return 0;
+
+        const analyzer    = disc.analyzer;
+        const bufferLen   = analyzer.fftSize;
+        const dataArray   = new Float32Array(bufferLen);
+        analyzer.getFloatTimeDomainData(dataArray);
+
+        // RMS over full buffer
+        let sum = 0;
+        for (let i = 0; i < bufferLen; i++) {
+            sum += dataArray[i] * dataArray[i];
+        }
+        const rms = Math.sqrt(sum / bufferLen);
+
+        // to dB, avoid log(0)
+        const db = 20 * Math.log10(rms + Number.EPSILON);
+
+        // map –60…0 dB -> 0…1
+        const minDb = -60;
+        const maxDb =   0;
+        const norm  = (db - minDb) / (maxDb - minDb);
+
+        return Math.max(0, Math.min(1, norm));
     }
 
     cleanupAudio(ended = false, all = false) {
@@ -422,8 +468,8 @@ class NatureDenaturedAndFoundAgain {
         ];
 
         this.radius = RADIUS;
-        this.boundaryRadius = this.radius / (GOLDEN_RATIO * GOLDEN_RATIO);
-        this.hardBoundaryRadius = this.boundaryRadius * 4;
+        this.boundaryRadius = SHORTEST_SEGMENT;
+        this.hardBoundaryRadius = RADIUS + SHORTER_SEGMENT;
         this.calculatePentagonPoints();
 
         this.boundaries = {
@@ -476,10 +522,14 @@ class NatureDenaturedAndFoundAgain {
         });
         const fileInput = document.getElementById('fileInput');
         fileInput.addEventListener('change', async () => {
+            // 20 files must be selected
+            if (fileInput.files.length !== 20) {
+                alert('Please select 20 audio files (4 tracks for each of the 5 discs).');
+                return;
+            }
             this.discs = this.createAudioSources(fileInput.files);
             await this.audioManager.init();
             document.getElementById('startButton').disabled = false;
-            document.getElementById('nextButton').disabled = false;
         });
         document.getElementById('startButton').addEventListener('click', () => this.start());
         document.getElementById('stopButton').addEventListener('click', () => this.stop());
@@ -540,6 +590,7 @@ class NatureDenaturedAndFoundAgain {
             this.update();
             document.getElementById('startButton').disabled = true;
             document.getElementById('stopButton').disabled = false;
+            document.getElementById('nextButton').disabled = false;
         }
     }
 
@@ -550,6 +601,7 @@ class NatureDenaturedAndFoundAgain {
             cancelAnimationFrame(this.animationFrameId);
             document.getElementById('startButton').disabled = false;
             document.getElementById('stopButton').disabled = true;
+            document.getElementById('nextButton').disabled = true;
         }
     }
 
