@@ -6,7 +6,6 @@ const LONGER_SEGMENT = DIAGONAL / GOLDEN_RATIO;
 const SHORTER_SEGMENT = LONGER_SEGMENT / GOLDEN_RATIO;
 const SHORTEST_SEGMENT = SHORTER_SEGMENT / GOLDEN_RATIO;
 
-
 class Vector2D {
     constructor(x = 0, z = 0) {
         this.x = x;
@@ -31,22 +30,63 @@ class Vector2D {
 }
 
 class Visualizer {
-    constructor(canvasId, audioManager, boundaries, scale = 20) {
+    constructor(canvasId, audioManager, boundaries, discs, scale = 8) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.audioManager = audioManager;
         this.boundaries = boundaries;
         this.scale = scale;
+        this.discs = discs;
         this.resize();
+        this.hiddenTitles = new Set();
+        this.setupInteraction();
+    }
+
+    setupInteraction() {
+        this.canvas.addEventListener('click', (e) => this.handleClick(e));
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            this.handleClick(e.touches[0]);
+        });
+    }
+
+    handleClick(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left - this.canvas.width / 2;
+        const y = event.clientY - rect.top - this.canvas.height / 2;
+        console.log(`Click at: (${x}, ${y})`);
+        const worldX = x / this.scale;
+        const worldZ = y / this.scale;
+        this.discs.forEach((disc, index) => {
+            const dx = disc.point.x - worldX;
+            const dz = disc.point.z - worldZ;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            console.log(`Disc ${index} distance: ${distance * this.scale}`);
+            if (distance * this.scale < 50) {
+                if (!this.hiddenTitles.has(index)) {
+                    this.hiddenTitles.add(index);
+                } else {
+                    this.hiddenTitles.delete(index);
+                }
+            }
+        });
+        console.log(this.hiddenTitles);
     }
 
     resize() {
         this.canvas.width = this.canvas.offsetWidth - 2; // 1px border on each side
         this.canvas.height = this.canvas.offsetHeight - 2; // 1px border on each side
-        this.scale = Math.min(this.canvas.width, this.canvas.height) * GOLDEN_SCALE;
+        // get viewport width
+        const viewportWidth = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+        const minScale = 8;
+        const maxScale = 20;
+        const minWidth = 360;
+        const maxWidth = 1440;
+        this.scale = minScale + (maxScale - minScale) * (viewportWidth - minWidth) / (maxWidth - minWidth);
+        this.scale = Math.min(Math.max(this.scale, minScale), maxScale); // Clamp between min and max
     }
 
-    draw(discs, appListener) {
+    draw(appListener) {
         // Clear canvas
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -68,28 +108,35 @@ class Visualizer {
         this.ctx.stroke();
 
         // Draw sound sources
-        discs.forEach((disc, index) => {
+        this.discs.forEach((disc, index) => {
             const loudness = this.audioManager.getLoudness(index);
             this.ctx.fillStyle = '#f00';
             this.ctx.beginPath();
             this.ctx.arc(disc.point.x * this.scale, disc.point.z * this.scale, 5, 0, Math.PI * 2);
             this.ctx.fill();
+
             this.ctx.save();
             this.ctx.shadowColor = 'rgba(255, 0, 0, 0.5)';
             this.ctx.shadowBlur = this.scale;
             this.ctx.filter = `blur(${this.scale}px)`;
             this.ctx.globalAlpha = 0.25;
+
             this.ctx.beginPath();
             this.ctx.arc(disc.point.x * this.scale, disc.point.z * this.scale, loudness * SHORTEST_SEGMENT * this.scale, 0, Math.PI * 2);
             this.ctx.fill();
+
             this.ctx.filter = 'none';
             this.ctx.globalAlpha = 1;
             this.ctx.restore();
-            this.ctx.fillStyle = '#fff';
-            this.ctx.font = 'italic 12px Libre Baskerville';
-            this.ctx.textAlign = 'center';
-            this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 20);
-            this.ctx.fillText(disc.tracks[this.audioManager.currentTrack].trackTitle, disc.point.x * this.scale, disc.point.z * this.scale + 35);
+
+            if (!this.hiddenTitles.has(index)) {
+                this.ctx.fillStyle = '#fff';
+                this.ctx.font = 'italic 1em Libre Baskerville';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 12 + this.scale);
+                this.ctx.fillText(`(${disc.year})`, disc.point.x * this.scale, disc.point.z * this.scale + 12 + this.scale * 2);
+                this.ctx.fillText(disc.tracks[this.audioManager.currentTrack].trackTitle, disc.point.x * this.scale, disc.point.z * this.scale + 12 + this.scale * 3);
+            }
         });
 
         // Draw listener pointer
@@ -126,15 +173,16 @@ class Visualizer {
 }
 
 class Listener {
-    constructor() {
+    constructor(boundaries) {
         this.position = new Vector2D();
         this.velocity = new Vector2D();
         this.rotation = 0;
         this.rotationVelocity = 0;
+        this.boundaries = boundaries;
         this.hitBounds = false;
     }
 
-    update(bounds, hardBounds, keys) {
+    update(keys) {
         const distanceFromCenter = this.position.length();
         const angle = Math.atan2(this.position.z, this.position.x);
         // Update velocities with random accelerations
@@ -146,10 +194,11 @@ class Listener {
             ));
             this.rotationVelocity += (Math.random() - 0.5) * 0.005;
 
-            if (distanceFromCenter > bounds) {
-                this.position.add(this.getCenterVector().scale(-0.01));
+            if (distanceFromCenter > this.boundaries.softBoundary) {
                 this.hitBounds = true;
-            } else if (this.hitBounds) {
+            }
+
+            if (this.hitBounds) {
                 this.position.add(this.getCenterVector().scale(-0.01));
             }
 
@@ -181,8 +230,8 @@ class Listener {
         }
 
         // Keep within bounds
-        if (distanceFromCenter > hardBounds) {
-            this.position = this.getCenterVector().scale(hardBounds);
+        if (distanceFromCenter > this.boundaries.hardBoundary) {
+            this.position = this.getCenterVector().scale(this.boundaries.hardBoundary);
             this.velocity.scale(-0.5);
         }
     }
@@ -211,7 +260,6 @@ class AudioManager {
         this.attackTime = 0.005; // Quick attack (5ms)
         this.releaseTime = 0.2;  // Slower release (200ms)
         this.lastFrameTime = new Array(discs.length).fill(0);
-        // this.ready = this.init();
         this.nextPrepared = false;
     }
 
@@ -318,14 +366,27 @@ class AudioManager {
             const media = this.currentSources[0].mediaElement;
             if (!this.nextPrepared && media.currentTime >= media.duration - 12) {
                 this.nextPrepared = true;
-                await this.prepareNextSources();
+                try {
+                    await this.prepareNextSources();
+                } catch (error) {
+                    console.error('Failed to prepare next sources:', error);
+                    this.nextPrepared = false;  // Reset flag on error
+                }
             }
         };
         this.endedListener = async () => {
             if (!this.nextPrepared) {
-                await this.prepareNextSources();
+                try {
+                    await this.prepareNextSources();
+                } catch (error) {
+                    console.error('Failed to prepare next sources:', error);
+                }
             }
-            await this.playNextSources(this.nextSources, true);
+            try {
+                await this.playNextSources(this.nextSources, true);
+            } catch (error) {
+                console.error('Failed to play next sources:', error);
+            }
         };
         this.currentSources.forEach(source => {
             source.mediaElement.addEventListener('timeupdate', this.timeUpdateListener);
@@ -411,76 +472,68 @@ class NatureDenaturedAndFoundAgain {
 
         this.discs = [
             {
-                "discName": "Fissures in Green (2011)",
+                "discName": "Fissures in Green",
+                "year": "2011",
                 "tracks": [
-                    { "trackTitle": "Rain at the Station", file: null },
-                    { "trackTitle": "Still Life with Cicadas, Waterfall and Radu", file: null },
-                    { "trackTitle": "Silent Prayer", file: null },
-                    { "trackTitle": "Langhalsen", file: null },
-                ],
-                "point": null,
-                "panner": null,
+                    { "trackTitle": "Rain at the Station" },
+                    { "trackTitle": "Still Life with Cicadas, Waterfall and Radu" },
+                    { "trackTitle": "Silent Prayer" },
+                    { "trackTitle": "Langhalsen" },
+                ]
             },
             {
-                "discName": "Pathsplitter (Yellow-Red) (2012)",
+                "discName": "Pathsplitter (Yellow-Red)",
+                "year": "2012",
                 "tracks": [
-                    { "trackTitle": "Canon a2", file: null },
-                    { "trackTitle": "Canon a3", file: null },
-                    { "trackTitle": "Canon a4", file: null },
-                    { "trackTitle": "Canon a5", file: null },
-                ],
-                "point": null,
-                "panner": null,
+                    { "trackTitle": "Canon a2" },
+                    { "trackTitle": "Canon a3" },
+                    { "trackTitle": "Canon a4" },
+                    { "trackTitle": "Canon a5" },
+                ]
             },
             {
-                "discName": "Landscape in Black and Grey (2013)",
+                "discName": "Landscape in Black and Grey",
+                "year": "2013",
                 "tracks": [
-                    { "trackTitle": "The Chords of the Grosse Mühl", file: null },
-                    { "trackTitle": "Six-Part Panorama", file: null },
-                    { "trackTitle": "Building a World", file: null },
-                    { "trackTitle": "The Disappearance of a World", file: null },
-                ],
-                "point": null,
-                "panner": null,
+                    { "trackTitle": "The Chords of the Grosse Mühl" },
+                    { "trackTitle": "Six-Part Panorama" },
+                    { "trackTitle": "Building a World" },
+                    { "trackTitle": "The Disappearance of a World" },
+                ]
             },
             {
-                "discName": "White Light Under the Door (2014)",
+                "discName": "White Light Under the Door",
+                "year": "2014",
                 "tracks": [
-                    { "trackTitle": "Electricity", file: null },
-                    { "trackTitle": "Heat", file: null },
-                    { "trackTitle": "Light", file: null },
-                    { "trackTitle": "Gas", file: null },
-                ],
-                "point": null,
-                "panner": null,
+                    { "trackTitle": "Electricity" },
+                    { "trackTitle": "Heat" },
+                    { "trackTitle": "Light" },
+                    { "trackTitle": "Gas" },
+                ]
             },
             {
-                "discName": "Hellgrün (Small New World) (2015)",
+                "discName": "Hellgrün (Small New World)",
+                "year": "2015",
                 "tracks": [
-                    { "trackTitle": "Malachite", file: null },
-                    { "trackTitle": "Bird Warnings", file: null },
-                    { "trackTitle": "The River is a Green-Brown God", file: null },
-                    { "trackTitle": "Emerald Twilight", file: null },
-                ],
-                "point": null,
-                "panner": null,
+                    { "trackTitle": "Malachite" },
+                    { "trackTitle": "Bird Warnings" },
+                    { "trackTitle": "The River is a Green-Brown God" },
+                    { "trackTitle": "Emerald Twilight" },
+                ]
             }
         ];
 
-        this.radius = RADIUS;
-        this.boundaryRadius = SHORTEST_SEGMENT;
-        this.hardBoundaryRadius = RADIUS + SHORTER_SEGMENT;
-        this.calculatePentagonPoints();
-
         this.boundaries = {
-            "radius": this.radius,
-            "softBoundary": this.boundaryRadius,
-            "hardBoundary": this.hardBoundaryRadius
+            "radius": RADIUS,
+            "softBoundary": SHORTEST_SEGMENT,
+            "hardBoundary": RADIUS + SHORTER_SEGMENT
         };
 
+        this.calculatePentagonPoints();
+
         this.audioManager = new AudioManager(this.audioContext, this.discs);
-        this.appListener = new Listener();
-        this.visualizer = new Visualizer('visualizer', this.audioManager, this.boundaries);
+        this.appListener = new Listener(this.boundaries);
+        this.visualizer = new Visualizer('visualizer', this.audioManager, this.boundaries, this.discs);
 
         this.animationFrameId = null;
         this.isPlaying = false;
@@ -490,55 +543,90 @@ class NatureDenaturedAndFoundAgain {
 
         this.setupEventListeners();
 
-        this.visualizer.draw(this.discs, this.appListener);
+        this.visualizer.draw(this.appListener);
     }
 
     calculatePentagonPoints() {
         for (let i = 0; i < 5; i++) {
             const angle = (((i * 2 * Math.PI) + Math.PI) / 5 + Math.PI / 4) * 2;
             this.discs[i].point = new Vector2D(
-                this.radius * Math.cos(angle),
-                this.radius * Math.sin(angle)
+                this.boundaries.radius * Math.cos(angle),
+                this.boundaries.radius * Math.sin(angle)
             );
         }
     }
 
-    createAudioSources(files) {
-        for (let file of files) {
-            const match = /^([1-5])\.0?([1-4])/.exec(file.name);
-            if (match) {
-                const discIndex = +(parseInt(match[1]) - 1);
-                const trackIndex = +(parseInt(match[2]) - 1);
-                this.discs[discIndex].tracks[trackIndex].file = file;
+    async handleDirectorySelection() {
+        const directoryButton = document.getElementById('directoryButton');
+        const directoryInput = document.getElementById('directoryInput');
+
+        if ('showDirectoryPicker' in window) {
+            directoryButton.disabled = true;
+            directoryButton.textContent = 'Loading...';
+
+            try {
+                const dirHandle = await window.showDirectoryPicker();
+                const audioFiles = [];
+
+                for await (const entry of dirHandle.values()) {
+                    if (entry.kind === 'file' && entry.name.match(/\.(mp3|wav|ogg|flac)$/i)) {
+                        const file = await entry.getFile();
+                        audioFiles.push(file);
+                    }
+                }
+
+                await this.processAudioFiles(audioFiles);
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    console.log('Directory selection was cancelled.');
+                } else {
+                    console.error('Error selecting directory:', err);
+                    alert('Error selecting directory. Please try again.');
+                    // Fallback to traditional input
+                    directoryInput.click();
+                }
+            } finally {
+                directoryButton.disabled = false;
+                directoryButton.textContent = 'Select Audio Directory';
             }
+        } else {
+            // Use traditional file input for unsupported browsers
+            directoryInput.click();
         }
-        return this.discs;
     }
 
-    setupEventListeners() {
-        window.addEventListener('load', () => {
-            this.visualizer.resize();
-            this.visualizer.draw(this.discs, this.appListener);
-        });
-        const fileInput = document.getElementById('fileInput');
-        fileInput.addEventListener('change', async () => {
-            // 20 files must be selected
-            if (fileInput.files.length !== 20) {
-                alert('Please select 20 audio files (4 tracks for each of the 5 discs).');
-                return;
+    async processAudioFiles(files) {
+        if (files.length !== 20) {
+            alert('Please select a directory with exactly 20 audio files (4 tracks for each of the 5 discs).');
+            return;
+        }
+        this.discs = this.assignAudioSources(files);
+        await this.audioManager.init();
+        document.getElementById('directoryButton').disabled = true;
+        document.getElementById('directoryButton').hidden = true;
+        document.getElementById('startButton').disabled = false;
+        document.getElementById('startButton').hidden = false;
+    }
+
+    assignAudioSources(files) {
+        for (let file of files) {
+            const match = /(\d{1,2}) Disc ([1-5])/.exec(file.name);
+            const match2 = /([1-5])\.(\d{1,2})/.exec(file.name);
+            let discIndex, trackIndex = null;
+            if (match) {
+                discIndex = +(parseInt(match[2]) - 1);
+                trackIndex = +((parseInt(match[1]) - 1) % 4);
+            } else if (match2) {
+                discIndex = +(parseInt(match2[1]) - 1);
+                trackIndex = +((parseInt(match2[2]) - 1) % 4);
+            } else {
+                // alert the user if at least one file is not named correctly
+                alert(`Files are not named correctly. Please name files as "XX Disc X" or "X.X"`);
+                return this.discs;
             }
-            this.discs = this.createAudioSources(fileInput.files);
-            await this.audioManager.init();
-            document.getElementById('startButton').disabled = false;
-        });
-        document.getElementById('startButton').addEventListener('click', () => this.start());
-        document.getElementById('stopButton').addEventListener('click', () => this.stop());
-        document.getElementById('nextButton').addEventListener('click', () => this.next());
-        window.addEventListener('beforeunload', () => {
-            if (this.audioManager) {
-                this.audioManager.destroy();
-            }
-        });
+            this.discs[discIndex].tracks[trackIndex].file = file;
+        }
+        return this.discs;
     }
 
     setupKeys() {
@@ -569,39 +657,56 @@ class NatureDenaturedAndFoundAgain {
     }
 
     update() {
-        this.appListener.update(this.boundaryRadius, this.hardBoundaryRadius, this.keys);
+        this.appListener.update(this.keys);
         this.updateAudioListener();
         this.visualizer.resize();
-        this.visualizer.draw(this.discs, this.appListener);
+        this.visualizer.draw(this.appListener);
 
         if (this.isPlaying) {
             this.animationFrameId = requestAnimationFrame(() => this.update());
         }
     }
 
-    async start() {
-        if (this.audioContext.state === 'suspended') {
-            await this.audioContext.resume();
-        }
+    setupEventListeners() {
+        window.addEventListener('load', () => {
+            this.visualizer.resize();
+            this.visualizer.draw(this.appListener);
+        });
 
+        const directoryButton = document.getElementById('directoryButton');
+        const directoryInput = document.getElementById('directoryInput');
+
+        directoryButton.addEventListener('click', () => this.handleDirectorySelection());
+        directoryInput.addEventListener('change', (e) => this.processAudioFiles(Array.from(e.target.files)));
+
+        document.getElementById('startButton').addEventListener('click', () => this.start());
+        document.getElementById('nextButton').addEventListener('click', () => this.next());
+
+        window.addEventListener('beforeunload', () => {
+            if (this.audioManager) {
+                this.audioManager.destroy();
+            }
+        });
+    }
+
+    async start() {
         if (!this.isPlaying) {
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
             await this.audioManager.play();
             this.isPlaying = true;
             this.update();
-            document.getElementById('startButton').disabled = true;
-            document.getElementById('stopButton').disabled = false;
+            document.getElementById('startButton').textContent = 'Pause';
             document.getElementById('nextButton').disabled = false;
-        }
-    }
-
-    async stop() {
-        if (this.isPlaying) {
+            document.getElementById('nextButton').hidden = false;
+        } else {
             await this.audioManager.pause();
             this.isPlaying = false;
             cancelAnimationFrame(this.animationFrameId);
-            document.getElementById('startButton').disabled = false;
-            document.getElementById('stopButton').disabled = true;
+            document.getElementById('startButton').textContent = 'Play';
             document.getElementById('nextButton').disabled = true;
+            document.getElementById('nextButton').hidden = true;
         }
     }
 
