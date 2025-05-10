@@ -1,4 +1,3 @@
-const GOLDEN_SCALE = (20 / 720); // 20 at 720 canvas width
 const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2; // Golden ratio for the pentagon
 const RADIUS = 10;
 const DIAGONAL = 2 * RADIUS * Math.sin((2 * Math.PI) / 5); // Diagonal length of the pentagon
@@ -37,6 +36,7 @@ class Visualizer {
         this.boundaries = boundaries;
         this.scale = scale;
         this.discs = discs;
+        this.fontSize = parseFloat(window.getComputedStyle(this.canvas).fontSize);
         this.resize();
         this.hiddenTitles = new Set();
         this.setupInteraction();
@@ -61,7 +61,6 @@ class Visualizer {
             const dx = disc.point.x - worldX;
             const dz = disc.point.z - worldZ;
             const distance = Math.sqrt(dx * dx + dz * dz);
-            console.log(`Disc ${index} distance: ${distance * this.scale}`);
             if (distance * this.scale < 50) {
                 if (!this.hiddenTitles.has(index)) {
                     this.hiddenTitles.add(index);
@@ -70,20 +69,13 @@ class Visualizer {
                 }
             }
         });
-        console.log(this.hiddenTitles);
     }
 
     resize() {
         this.canvas.width = this.canvas.offsetWidth - 2; // 1px border on each side
         this.canvas.height = this.canvas.offsetHeight - 2; // 1px border on each side
-        // get viewport width
-        const viewportWidth = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
-        const minScale = 8;
-        const maxScale = 20;
-        const minWidth = 360;
-        const maxWidth = 1440;
-        this.scale = minScale + (maxScale - minScale) * (viewportWidth - minWidth) / (maxWidth - minWidth);
-        this.scale = Math.min(Math.max(this.scale, minScale), maxScale); // Clamp between min and max
+        this.scale = (this.canvas.width * 0.9) / (2 * this.boundaries.hardBoundary); // 90% of canvas width
+        this.fontSize = parseFloat(window.getComputedStyle(this.canvas).fontSize);
     }
 
     draw(appListener) {
@@ -129,13 +121,15 @@ class Visualizer {
             this.ctx.globalAlpha = 1;
             this.ctx.restore();
 
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = `italic 1em Libre Baskerville`;
+            this.ctx.textAlign = 'center';
+            const lineHeight = this.fontSize * 1.5;
+
             if (!this.hiddenTitles.has(index)) {
-                this.ctx.fillStyle = '#fff';
-                this.ctx.font = 'italic 1em Libre Baskerville';
-                this.ctx.textAlign = 'center';
-                this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 12 + this.scale);
-                this.ctx.fillText(`(${disc.year})`, disc.point.x * this.scale, disc.point.z * this.scale + 12 + this.scale * 2);
-                this.ctx.fillText(disc.tracks[this.audioManager.currentTrack].trackTitle, disc.point.x * this.scale, disc.point.z * this.scale + 12 + this.scale * 3);
+                this.ctx.fillText(disc.discName, disc.point.x * this.scale, disc.point.z * this.scale + 10 + lineHeight);
+                this.ctx.fillText(`(${disc.year})`, disc.point.x * this.scale, disc.point.z * this.scale + 10 + lineHeight * 2);
+                this.ctx.fillText(disc.tracks[this.audioManager.currentTrack].trackTitle, disc.point.x * this.scale, disc.point.z * this.scale + 10 + lineHeight * 3);
             }
         });
 
@@ -683,9 +677,7 @@ class NatureDenaturedAndFoundAgain {
         document.getElementById('nextButton').addEventListener('click', () => this.next());
 
         window.addEventListener('beforeunload', () => {
-            if (this.audioManager) {
-                this.audioManager.destroy();
-            }
+            this.destroy();
         });
     }
 
